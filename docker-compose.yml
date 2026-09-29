@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    container_name: quote-search-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - quote_bot_data:/data
+      - ./paintings:/app/paintings:ro
+      # первичный корпус: положите result.json рядом до первого старта;
+      # после первичной индексации строку можно убрать (обновления через /resync)
+      - ./result.json:/app/result.json:ro
+
+volumes:
+  quote_bot_data:

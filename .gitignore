@@ -1,0 +1,26 @@
+# секреты
+.env
+
+# корпус и производные индексов — строятся из result.json
+result.json
+corpus.npz
+corpus_meta.json
+normalization.json
+
+# локальное состояние: бд, кэши, разметка картин
+quotes.db
+wiki_cache.json
+file_ids.json
+painting_map.json
+
+# докачанные картины (манифест и векторы в git входят, jpg — нет)
+paintings/*.jpg
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# артефакты замеров и логи
+eval_cache_*.npz
+*.log
