@@ -10,7 +10,7 @@ Le projet a été écrit pour un canal de citations (philosophie, poésie, aphor
 
 - Recherche par thème (« solitude »), par auteur (« Pasternak sur l'amour ») et par phrase exacte entre guillemets (« pitié de soi »)
 - Recherche hybride : vecteurs denses de qwen3-embedding-4b, repli lexical BM25 pour les noms rares et les phrases exactes, fusion par RRF
-- Annotation du corpus par LLM : kind (citation / poème / réflexion de l'auteur), auteur, source. Règle de confiance : l'auteur n'est renseigné qu'à partir d'une signature explicite dans le texte du post ; deviner au style est interdit et est en outre vérifié par le code
+- Annotation du corpus par LLM : kind (citation / poème / réflexion de l'auteur), auteur, source. Règle de confiance : l'auteur n'est renseigné qu'à partir d'une signature explicite dans le texte du post ; deviner d'après le style est interdit et est en outre vérifié par le code
 - Choix du tableau pour la carte sans LLM : thème de la requête, carte sémantique « texte — tableau », thème du texte de la citation, hachage stable de post_id (une carte a toujours le même tableau)
 - Boutons sous la carte : une autre citation, citation proche, lire en entier, Sic erat in fatis (branche aléatoire)
 - Fiches sur l'auteur et le tableau depuis Wikipédia, assemblées en streaming

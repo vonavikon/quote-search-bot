@@ -22,7 +22,7 @@ The project was written for a quotes channel (philosophy, poetry, aphorisms), bu
 
 - Python 3.12+
 - A bot token from [@BotFather](https://t.me/BotFather)
-- An [bothub](https://bothub.place) API key — a gateway for OpenAI-compatible models (embeddings and LLM)
+- A [bothub](https://bothub.place) API key — a gateway for OpenAI-compatible models (embeddings and LLM)
 - A channel export: Telegram Desktop, the channel, menu (⋮), Export chat history, Machine-readable JSON format
 
 ## Getting started
