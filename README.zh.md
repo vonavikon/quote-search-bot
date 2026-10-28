@@ -1,6 +1,8 @@
 # quote-search-bot
 
 [RU](README.md) · [EN](README.en.md) · **中文** · [Español](README.es.md) · [Français](README.fr.md)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-0%2F75_clean-brightgreen)](https://www.virustotal.com/gui/file/e479ad7919419e88c38fe93f005203b00ea4e9e946b42b55c899c1184777773c)
+
 
 Telegram 机器人，对自己的文本语料做语义搜索。数据来源是 Telegram 频道的 JSON 导出：帖子被转成向量索引，搜索按语义进行，而不是按子串匹配。结果卡片是带作者署名的文本，配上一张来自公有领域画作池（Wikimedia Commons）的画。
 

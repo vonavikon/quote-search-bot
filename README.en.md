@@ -1,6 +1,8 @@
 # quote-search-bot
 
 [RU](README.md) · **EN** · [中文](README.zh.md) · [Español](README.es.md) · [Français](README.fr.md)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-0%2F75_clean-brightgreen)](https://www.virustotal.com/gui/file/e479ad7919419e88c38fe93f005203b00ea4e9e946b42b55c899c1184777773c)
+
 
 A Telegram bot for semantic search over your own text corpus. The data source is a Telegram channel export in JSON: posts are turned into a vector index, and search works by meaning rather than by substring. A result card is the text with the author's signature and a painting from a public-domain pool (Wikimedia Commons).
 

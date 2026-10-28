@@ -1,6 +1,8 @@
 # quote-search-bot
 
 **RU** · [EN](README.en.md) · [中文](README.zh.md) · [Español](README.es.md) · [Français](README.fr.md)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-0%2F75_clean-brightgreen)](https://www.virustotal.com/gui/file/e479ad7919419e88c38fe93f005203b00ea4e9e946b42b55c899c1184777773c)
+
 
 Telegram-бот семантического поиска по своему корпусу текстов. Источник данных — экспорт Telegram-канала в JSON: посты превращаются в векторный индекс, поиск идёт по смыслу, а не по подстроке. Карточка результата — текст с подписью автора и картиной из пула общественного достояния (Wikimedia Commons).
 
