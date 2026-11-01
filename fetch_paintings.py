@@ -1,10 +1,12 @@
-"""Загрузка кураторского пула PD-art с Wikimedia Commons в paintings/.
+"""Downloads the curated PD-art pool from Wikimedia Commons into
+paintings/.
 
-Манифест paintings.json задаёт поисковую строку (search); скрипт ищет файл
-через API Commons (namespace File, bitmap), берёт миниатюру 1280px и пишет
-{id}.jpg. Повторный запуск докачивает только недостающее.
+The paintings.json manifest defines a search string per entry; the
+script finds the file through the Commons API (namespace File, bitmap),
+takes a 1280px thumbnail and writes {id}.jpg. A re-run fetches only what
+is missing.
 
-Запуск: python -X utf8 fetch_paintings.py [--force]
+Run: python -X utf8 fetch_paintings.py [--force]
 """
 import json
 import os
@@ -22,7 +24,8 @@ WIDTH = 1280
 
 
 def _get(url, retries=4):
-    """GET с ретраями: Commons ловит серии запросов 429, ждём и повторяем."""
+    """GET with retries: Commons throws 429 at request bursts, wait and
+    repeat."""
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=UA)
@@ -40,7 +43,8 @@ def _polite():
 
 
 def find_file(query):
-    """Поиск файла в namespace 6 (File:) по строке. -> заголовок File:...|None."""
+    """Search for a file in namespace 6 (File:) by string. -> a File:...
+    title |None."""
     q = urllib.parse.quote(f"{query} filetype:bitmap")
     data = json.loads(_get(f"{API}?action=query&list=search&srnamespace=6"
                            f"&srlimit=5&srsearch={q}&format=json"))
@@ -50,7 +54,8 @@ def find_file(query):
 
 
 def thumb_url(file_title):
-    """URL миниатюры WIDTHpx по заголовку файла. -> (url, width, height)|None."""
+    """The thumbnail URL at WIDTHpx for a file title.
+    -> (url, width, height)|None."""
     t = urllib.parse.quote(file_title)
     data = json.loads(_get(f"{API}?action=query&titles={t}&prop=imageinfo"
                            f"&iiprop=url|size&iiurlwidth={WIDTH}&format=json"))

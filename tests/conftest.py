@@ -1,5 +1,5 @@
-"""Общие фикстуры: все пути данных уводятся в tmp, чтобы тесты не трогали
-реальный корпус и не ходили в сеть."""
+"""Shared fixtures: all data paths are redirected into tmp so the tests
+never touch the real corpus and never hit the network."""
 import json
 
 import numpy as np
@@ -15,20 +15,22 @@ import router
 
 @pytest.fixture
 def tmp_data(tmp_path, monkeypatch):
-    """Перенаправляет corpus/normalization/file_ids пути в tmp_path."""
+    """Redirects the corpus/normalization/file_ids paths into tmp_path."""
     monkeypatch.setattr(index, "CACHE", tmp_path / "corpus.npz")
     monkeypatch.setattr(index, "META", tmp_path / "corpus_meta.json")
     monkeypatch.setattr(normalize, "CACHE", tmp_path / "normalization.json")
     monkeypatch.setattr(router, "NORM_CACHE", tmp_path / "normalization.json")
     monkeypatch.setattr(cards, "NORM_PATH", tmp_path / "normalization.json")
     monkeypatch.setattr(images, "FILE_IDS_PATH", tmp_path / "file_ids.json")
-    # load_posts без экспорта читает META_PATH; экспорт указываем несуществующим
+    # load_posts without an export reads META_PATH; point the export at a
+    # nonexistent file
     monkeypatch.setattr(load_corpus, "META_PATH", str(tmp_path / "corpus_meta.json"))
     monkeypatch.setattr(load_corpus, "DEFAULT_PATH", str(tmp_path / "result.json"))
-    # манифест склеек тоже в tmp: тесты пишут свой, боевой не мешает
+    # the glue manifest goes to tmp too: tests write their own, the live
+    # one stays out of the way
     monkeypatch.setattr(load_corpus, "SPLITS_PATH", str(tmp_path / "splits.json"))
     monkeypatch.setattr(load_corpus, "OCR_PATH", str(tmp_path / "ocr.json"))
-    # SQLite-база строит путь из DATA_DIR динамически — тоже в tmp
+    # the SQLite base builds its path from DATA_DIR dynamically — tmp too
     monkeypatch.setattr(load_corpus, "DATA_DIR", str(tmp_path))
     images._manifest.cache_clear()
     images._cached_theme_index.cache_clear()
@@ -37,7 +39,8 @@ def tmp_data(tmp_path, monkeypatch):
 
 @pytest.fixture
 def norm_cache(tmp_data):
-    """Мини-кэш нормализации: Пастернак (quote, подписан), размышление, поэма."""
+    """A mini normalization cache: Pasternak (quote, signed), a
+    reflection, a poem."""
     items = {
         "101": {"kind": "quote", "author": "Борис Пастернак", "source": None,
                 "author_evidence": "signed"},
@@ -53,7 +56,8 @@ def norm_cache(tmp_data):
 
 @pytest.fixture
 def tiny_corpus(tmp_data):
-    """Индекс на 2 поста + мок эмбеддинга (детерминированные векторы, без API)."""
+    """A 2-post index + an embedding mock (deterministic vectors, no
+    API)."""
     posts = [
         {"id": 101, "date": "2024-01-01", "author": "",
          "text": "Любовь не стихия, но гаснет, как стихия."},

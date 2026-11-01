@@ -1,7 +1,8 @@
-"""bothub /embeddings клиент. OpenAI-совместимый шлюз https://openai.bothub.chat/v1.
+"""bothub /embeddings client. An OpenAI-compatible gateway,
+https://openai.bothub.chat/v1.
 
-Ключ берётся из BOTHUB_API_KEY (env) или .env рядом с кодом. Никогда не
-печатать и не коммитить.
+The key comes from BOTHUB_API_KEY (env) or a .env next to the code.
+Never print it or commit it.
 """
 import json
 import os
@@ -9,15 +10,16 @@ import re
 import urllib.request
 
 BASE = "https://openai.bothub.chat/v1"
-MODEL = "qwen3-embedding-4b"  # выбор по замеру recall@5, dim 2560
+MODEL = "qwen3-embedding-4b"  # picked by a recall@5 measurement, dim 2560
 
-# $/токен по замеру 2026-09-25 (28 токенов запроса = $0.0000006); usage
-# эмбеддингов от bothub не несёт cost — дописываем сами для /stats
+# $/token as measured on 2026-09-25 (28 query tokens = $0.0000006); the
+# embeddings usage from bothub carries no cost — we append it ourselves
+# for /stats
 PM = 0.022 / 1e6
 
-# Qwen3-Embedding асимметричная instruction-tuned: документ шьётся как есть,
-# запрос — с префиксом задачи. Без префикса эмбеддинг запроса теряет поисковый
-# смысл: recall@5 падает 0.556 -> 0.069.
+# Qwen3-Embedding is an asymmetric instruction-tuned model: documents are
+# embedded as is, the query — with a task prefix. Without the prefix the
+# query embedding loses its search meaning: recall@5 drops 0.556 -> 0.069.
 QUERY_PREFIX = ("Instruct: Given a user topic query, "
                 "retrieve relevant quotes/passages on that theme.\nQuery: ")
 
@@ -27,7 +29,7 @@ def _key() -> str:
     if k:
         return k.strip()
     candidates = [
-        os.path.join(os.path.dirname(__file__), ".env"),  # локальный .env проекта
+        os.path.join(os.path.dirname(__file__), ".env"),  # the project's local .env
     ]
     for p in candidates:
         p = os.path.normpath(p)
@@ -43,7 +45,8 @@ def _key() -> str:
 def embed(text, model=MODEL):
     """text: str | list[str] -> (list[list[float]], usage).
 
-    Всегда возвращает список векторов (даже для одного текста) + usage для учёта цены.
+    Always returns a list of vectors (even for a single text) + usage
+    for cost tracking.
     """
     inp = [text] if isinstance(text, str) else text
     body = json.dumps({"model": model, "input": inp}).encode("utf-8")
@@ -68,8 +71,9 @@ def embed(text, model=MODEL):
 
 
 def embed_query(query, model=MODEL):
-    """Эмбеддинг поискового запроса (str или list[str]). Для qwen3-embedding
-    добавляет instruction-префикс (документы шьются без него, см. QUERY_PREFIX)."""
+    """The embedding of a search query (str or list[str]). For
+    qwen3-embedding it prepends the instruction prefix (documents are
+    embedded without it, see QUERY_PREFIX)."""
     if model.startswith("qwen3-embedding"):
         pre = lambda s: s if s.startswith("Instruct:") else QUERY_PREFIX + s  # noqa: E731
         query = pre(query) if isinstance(query, str) else [pre(s) for s in query]

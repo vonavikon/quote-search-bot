@@ -1,4 +1,5 @@
-"""Типографика показа: кавычки-ёлочки, межсловное тире, всё остальное как есть."""
+"""Display typography: guillemet quotes, the inter-word dash,
+everything else as is."""
 import text_clean
 
 
@@ -7,7 +8,8 @@ def test_quotes_paired():
 
 
 def test_quotes_multiline_span():
-    """Многострочная прямая цитата: открылась в одной строке, закрылась в другой."""
+    """A multi-line straight quote: opened on one line, closed on
+    another."""
     out = text_clean.apply('"строка первая\nстрока вторая"')
     assert out == "«строка первая\nстрока вторая»"
 

@@ -1,4 +1,4 @@
-"""Brute-force поиск по корпусу: запрос -> косинус ко всем постам -> top-k.
+"""Brute-force corpus search: query -> cosine against all posts -> top-k.
 
   python -X utf8 search.py одиночество
   python -X utf8 search.py "про дружбу"
@@ -15,7 +15,7 @@ def search(query, k=5):
     V, posts = build()
     q = np.array(embed_query(query)[0][0], dtype=np.float32)
 
-    # косинус ко всем одним матричным умножением: нормируем и (V @ q)
+    # cosine against everything in one matrix multiplication: normalize and (V @ q)
     Vn = V / np.linalg.norm(V, axis=1, keepdims=True)
     sims = Vn @ (q / np.linalg.norm(q))
     idx = np.argsort(sims)[::-1][:k]

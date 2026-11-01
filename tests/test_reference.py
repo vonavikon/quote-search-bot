@@ -1,11 +1,12 @@
-"""Справки по Википедии: кэш, дизамбиг-фильтр, заглушки, стрим — без сети."""
+"""Wikipedia reference cards: cache, the disambiguation filter, stubs,
+streaming — without the network."""
 import json
 
 import reference
 
 
 def test_no_author_stub():
-    """Без автора — статичная заглушка, LLM не участвует."""
+    """No author — a static stub, no LLM involved."""
     assert "не нашли" in reference.about_author(None)
     assert "не нашли" in reference.about_author("")
 
@@ -17,7 +18,8 @@ def test_no_wiki_stub(monkeypatch):
 
 
 def test_author_cached_no_llm(monkeypatch):
-    """Готовая справка в кэше — LLM не зовётся, сеть не трогаем."""
+    """A ready reference card in the cache — the LLM is not called, the
+    network untouched."""
     def boom(*a, **k):
         raise AssertionError("compose не должен зваться")
     monkeypatch.setattr(reference, "_compose", boom)
@@ -27,7 +29,8 @@ def test_author_cached_no_llm(monkeypatch):
 
 
 def test_disambig_extract_rejected(monkeypatch):
-    """Страница-дизамбиг («может означать») — не статья, справке не годится."""
+    """A disambiguation page («может означать») — not an article, useless
+    for a reference card."""
     def fake_http(params):
         if params.get("action") == "opensearch":
             return ["", ["Никто"]]
@@ -41,9 +44,10 @@ def test_disambig_extract_rejected(monkeypatch):
 
 
 def test_disambig_structural_rejected(monkeypatch):
-    """Дизамбиг без маркера «многозначн» (живой кейс с прода: «Нарцисс»)
-    ловится структурно — >= 3 строк «Нарцисс — значение» с ударением
-    в титуле первой строки. Иначе текст страницы значений уходит в LLM."""
+    """A disambiguation without the «многозначн» marker (a live case from
+    production: «Нарцисс») is caught structurally — >= 3 lines «Нарцисс —
+    meaning» with a stressed title in the first line. Otherwise the
+    disambiguation text goes to the LLM."""
     page_text = ("Нарци́сс (лат. Narcissus от др.-греч. Νάρκισσος):\n\n"
                  "Нарцисс, точнее Нарки́сс — персонаж древнегреческой мифологии.\n"
                  "Нарцисс — род однодольных растений.\n"
@@ -58,10 +62,11 @@ def test_disambig_structural_rejected(monkeypatch):
 
 
 def test_meta_refusal_never_cached(monkeypatch):
-    """LLM выдала мету про вход («в предоставленном тексте нет статьи...») —
-    пользователь видит статичную заглушку, мусор не кэшируется на год.
-    Живой кейс: дизамбиг проскочил старый фильтр, справка закэшировалась
-    с разбором страницы значений и жила до ручной чистки."""
+    """The LLM produced meta about its input («в предоставленном тексте
+    нет статьи...») — the user sees a static stub, and the garbage is not
+    cached for a year. A live case: a disambiguation slipped past the old
+    filter, the reference card got cached with a disambiguation-page
+    breakdown and lived until a manual cleanup."""
     def fake_compose(subj, texts, on_chunk=None):
         return ("В предоставленном тексте нет статьи о картине «Нарцисс» "
                 "Караваджо. Текст представляет собой страницу значений "
@@ -79,12 +84,12 @@ def test_meta_refusal_never_cached(monkeypatch):
     out = reference.about_painting(p)
     assert "не нашли" in out and "открытых источниках" in out
     assert "предоставленном" not in out
-    assert cached == []  # мета в кэш не попала
+    assert cached == []  # the meta never reached the cache
 
 
 def test_cached_meta_selfheals(monkeypatch):
-    """Мета-справка, закэшированная на год старой версией, при чтении
-    мимоходом вычищается: кэш игнорируется, справка пересобирается."""
+    """A meta reference card cached for a year by an old version is
+    cleaned out on read: the cache is ignored, the card is rebuilt."""
     bad = ("В предоставленном тексте нет статьи о картине. "
            "Текст представляет собой страницу значений.")
     monkeypatch.setattr(reference, "_cache_get",
@@ -102,8 +107,8 @@ def test_cached_meta_selfheals(monkeypatch):
 
 
 def test_cached_disambig_extract_selfheals(monkeypatch):
-    """Extract с дизамбигом, закэшированный до структурного фильтра,
-    при чтении перехватывается и перезаписывается пустым."""
+    """An extract with a disambiguation, cached before the structural
+    filter, is intercepted on read and overwritten with empty."""
     page_text = ("Нарцисс — персонаж мифологии.\n"
                  "Нарцисс — род растений.\n"
                  "Нарцисс — термин психологии.")
@@ -112,7 +117,7 @@ def test_cached_disambig_extract_selfheals(monkeypatch):
     monkeypatch.setattr(reference, "_cache_put",
                         lambda key, v: saved.append((key, v)))
     assert reference.extract("Нарцисс") is None
-    assert ("extract:Нарцисс", "") in saved  # кэш вылечен
+    assert ("extract:Нарцисс", "") in saved  # the cache is healed
 
 
 def test_painting_no_wiki_stub(monkeypatch):
@@ -125,16 +130,17 @@ def test_painting_no_wiki_stub(monkeypatch):
 
 
 def test_painting_search_fallback(monkeypatch):
-    """opensearch промахнулся, короткое название — дизамбиг: запасной
-    list=search находит статью «Нарцисс (Караваджо)» (живой кейс с прода).
-    Статья обязана звать художника в тексте — миф о Нарцисс не пройдёт."""
+    """opensearch missed and the short title is a disambiguation: the
+    backup list=search finds the article «Нарцисс (Караваджо)» (a live
+    case from production). The article must name the painter in its
+    text — the Narcissus myth won't pass."""
     def fake_resolve(t):
         return "Нарцисс" if t == "Нарцисс" else None
 
     def fake_extract(t):
         if t == "Нарцисс (Караваджо)":
             return "Картина Караваджо 1599 года, хранится в Риме."
-        return None  # дизамбиг и нерелевантные — пусто
+        return None  # disambiguations and irrelevant ones — empty
 
     def fake_http(params):
         assert params["action"] == "query" and params["list"] == "search"
@@ -154,8 +160,8 @@ def test_painting_search_fallback(monkeypatch):
 
 
 def test_stream_pieces_and_usage(monkeypatch):
-    """SSE-стрим: копятся только content-куски (reasoning мимо),
-    usage приходит отдельным чанком, [DONE] завершает."""
+    """The SSE stream: only content chunks accumulate (reasoning goes
+    by), usage arrives in its own chunk, [DONE] ends it."""
     import urllib.request
     lines = [
         'data: {"choices":[{"delta":{"reasoning_content":"думаю"}}]}'.encode(),
@@ -184,7 +190,7 @@ def test_stream_pieces_and_usage(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen",
                         lambda req, timeout=0: FakeResp())
-    monkeypatch.setattr(reference, "_key", lambda: "test-key")  # CI без .env
+    monkeypatch.setattr(reference, "_key", lambda: "test-key")  # CI without .env
     chunks = []
     text, usage = reference._stream(b"{}", chunks.append)
     assert text == "Монтень — эссеист."
@@ -193,7 +199,8 @@ def test_stream_pieces_and_usage(monkeypatch):
 
 
 def test_compose_falls_back_when_stream_dies(monkeypatch):
-    """Стрим упал посередине — один неразрывный повтор, текст собирается."""
+    """The stream died midway — one non-streaming retry, the text still
+    comes together."""
     import urllib.request
 
     class FakeResp:
@@ -213,14 +220,15 @@ def test_compose_falls_back_when_stream_dies(monkeypatch):
         return FakeResp()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(reference, "_key", lambda: "test-key")  # CI без .env
+    monkeypatch.setattr(reference, "_key", lambda: "test-key")  # CI without .env
     monkeypatch.setattr("spend.log_call", lambda *a, **k: None)
     assert reference._compose("тест", ["текст"]) == "Готово."
 
 
 def test_about_author_source_tail(monkeypatch):
-    """source из подписи: статья произведения в сборке + строка о подписи —
-    даже когда вики-статьи о произведении нет."""
+    """A source from the signature: the work's article in the assembly +
+    the signature line — even when there is no wiki article about the
+    work."""
     seen = {}
 
     def fake_compose(subj, texts, on_chunk=None):

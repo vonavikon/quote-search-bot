@@ -1,16 +1,17 @@
-"""Реранк: cross-encoder поверх топ-N кандидатов от гибрида.
+"""Reranking: a cross-encoder over the top-N candidates from the hybrid.
 
-Bi-encoder (эмбеддинги, stages 1-5 в hybrid.py) шьёт запрос и документ
-РАЗДЕЛЬНО — каждый текст «ослеплён» относительно другого. Быстро, но ловит
-только грубое тематическое сходство. Cross-encoder читает запрос+документ
-ВМЕСТЕ как одну пару → одно число релевантности. Видит нюансы («одиночество
-как страдание» vs «одиночество как уединение»), отличает тему от случайного
-упоминания слова. Дорого: один прогон модели на каждую пару. Поэтому
-двухстадийный RAG: дешёвый recall (гибрид → топ-50) → дорогой precision
-(cross-encoder → топ-5).
+A bi-encoder (embeddings, stages 1-5 in hybrid.py) embeds the query and
+the document SEPARATELY — each text is "blind" to the other. Fast, but
+it catches only coarse thematic similarity. A cross-encoder reads
+query+document TOGETHER as one pair → a single relevance number. It sees
+nuance ("loneliness as suffering" vs "loneliness as solitude"), and
+tells a theme from a random mention of a word. Expensive: one model pass
+per pair. Hence two-stage RAG: cheap recall (hybrid → top-50) →
+expensive precision (cross-encoder → top-5).
 
-Модель: BAAI/bge-reranker-v2-m3 (мультиязычная, ~2.2 ГБ, отдельная от bge-m3).
-Запуск:  python -X utf8 rerank.py одиночество
+Model: BAAI/bge-reranker-v2-m3 (multilingual, ~2.2 GB, separate from
+bge-m3).
+Run:  python -X utf8 rerank.py одиночество
 """
 import sys
 
@@ -23,7 +24,7 @@ _CE = None
 
 
 def _ce():
-    """Ленивая загрузка cross-encoder (первый раз качает ~2.2 ГБ)."""
+    """Lazy cross-encoder loading (the first run downloads ~2.2 GB)."""
     global _CE
     if _CE is None:
         print(f"загрузка {MODEL_NAME}...", flush=True)
@@ -32,10 +33,10 @@ def _ce():
 
 
 def rerank(query, candidates, top=5):
-    """Переранжировать кандидатов cross-encoder'ом.
+    """Rerank candidates with the cross-encoder.
 
-    candidates: [(idx, text), ...] — что отдал гибрид (топ-50).
-    Возвращает: [(idx, score), ...] — отсортировано по убыванию score, [:top].
+    candidates: [(idx, text), ...] — what the hybrid returned (top-50).
+    Returns: [(idx, score), ...] — sorted by score descending, [:top].
     """
     pairs = [[query, text] for _, text in candidates]
     scores = _ce().predict(pairs).tolist()
@@ -52,9 +53,9 @@ def run(query, pool=50, top=5):
     cand_idx, posts, dense, bm25, _path = retrieve(query, n=pool)
     candidates = [(i, posts[i]["text"]) for i in cand_idx]
 
-    # «до» — порядок гибрида (RRF) внутри топ-{top}
+    # "before" — the hybrid order (RRF) inside the top-{top}
     before = cand_idx[:top]
-    # «после» — cross-encoder
+    # "after" — the cross-encoder
     after = rerank(query, candidates, top=top)
     after_idx = [i for i, _ in after]
     after_scores = dict(after)
@@ -70,7 +71,7 @@ def run(query, pool=50, top=5):
         a_line = f"id{posts[ai]['id']:<4} {after_scores[ai]:>6.3f} {a_mark}"
         print(f"{r+1:<3}{b_line:<58}{a_line:<22}")
 
-    # кого cross-encoder вытащил из глубины пула (не было в гибрид-топ-5)
+    # whom the cross-encoder rescued from deep in the pool (not in the hybrid top-5)
     rescued = [i for i in after_idx if i not in before]
     if rescued:
         print(f"\nвытащил из глубины пула (вне гибрид-топ-{top}):")

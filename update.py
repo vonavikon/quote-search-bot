@@ -1,10 +1,10 @@
-"""Обновление пула после свежего экспорта result.json — одна команда.
+"""Pool update after a fresh result.json export — one command.
 
-Делает: index.build() инкрементом (дошьёт только новые/изменённые посты,
-старые векторы из кэша) -> normalize.run() инкрементом (метаданные только
-для неразмеченных) -> сводка.
+Does: index.build() incrementally (re-embeds only new/changed posts, old
+vectors from the cache) -> normalize.run() incrementally (metadata only
+for the unlabeled) -> a summary.
 
-Не запускать параллельно с normalize.py: оба пишут normalization.json.
+Do not run in parallel with normalize.py: both write normalization.json.
 """
 import json
 

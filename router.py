@@ -1,22 +1,26 @@
-"""Роутер на правилах: без LLM-классификатора.
+"""A rule-based router: no LLM classifier.
 
-Один домен — любой текстовый запрос ведёт к поиску; LLM подключается только
-для переформулировки разговорного запроса (длиннее 2 слов). Кнопки бота
-(Sic erat in fatis, «поясни») — отдельные интенты, сюда не попадают.
+One domain — any textual query leads to search; the LLM is only involved
+in reformulating a conversational query (longer than 2 words). The bot's
+buttons (Sic erat in fatis, "explain") are separate intents and never get
+here.
 
-Правила по порядку:
-  1. «/...» -> admin (/resync /stats; прочее — подсказка)
-  2. приветствие/мета по словарю -> intro (заготовленный ответ, не поиск)
-  3. имя автора из базы (normalization.json, склонения префиксом) -> фасет:
-     остаток запроса — тема, сам автор — фильтр выдачи
-  4. <= 2 значимых слов -> в поиск как есть, LLM не зовём
-  5. длиннее 12 слов -> дословный путь без LLM (вставленный фрагмент цитаты)
-  6. остальное -> LLM-переформулировка в 2-5 слов (сбой — сырой текст)
+Rules in order:
+  1. "/..." -> admin (/resync /stats; anything else — a hint)
+  2. greeting/meta from a dictionary -> intro (a canned reply, not search)
+  3. an author name from the base (normalization.json, declensions by
+     prefix) -> a facet: the rest of the query is the topic, the author
+     himself is a filter on the results
+  4. <= 2 meaningful words -> to search as is, no LLM called
+  5. longer than 12 words -> the literal path without an LLM (a pasted
+     quote fragment)
+  6. everything else -> an LLM reformulation into 2-5 words (a failure —
+     the raw text)
 
-Выдача фильтруется kind in quote/poem: личные размышления
-автора канала не прилетают подписчику как «цитата».
+Results are filtered by kind in quote/poem: the channel author's personal
+reflections never reach a subscriber as a "quote".
 
-Запуск:
+Run:
   python -X utf8 router.py подскажи что-нибудь мудрое про дружбу
 """
 import json
@@ -33,16 +37,17 @@ INTRO_RE = re.compile(
     r"^(привет\w*|здравств\w*|добр(ый|ое) (день|вечер|утро)|хай|ку|спасибо|"
     r"благодар\w*|что ты умеешь|помощь|\/?start|help)[!,. ]*$", re.I)
 
-# слова-упаковка: не несут темы, срезаем до поиска
+# packaging words: they carry no topic, cut them before search
 _STOP = ("цитата цитаты цитату цитат стих стихи стихотворение найди подскажи "
          "покажи хочу ищи пожалуйста дай посмотри про о об на тему мне мне-бы "
          "хочу-бы какое какая какие").split()
 STOPWORDS = set(_STOP)
 
-MAX_WORDS_DIRECT = 2  # <= 2 значимых слов: в поиск как есть, без LLM
-# длиннее 12 слов без кавычек — дословный путь, без LLM: это почти всегда
-# вставленный кусок цитаты («помню только фрагмент...»), а не разговорный
-# запрос. Заодно анти-абьюз: простыня в 4000 знаков не уходит в переформулировку
+MAX_WORDS_DIRECT = 2  # <= 2 meaningful words: to search as is, no LLM
+# longer than 12 words without quotes — the literal path, no LLM: it is
+# almost always a pasted quote fragment ("помню только фрагмент..."), not
+# a conversational query. Also anti-abuse: a 4000-char wall of text never
+# goes into a reformulation
 MAX_WORDS_QUOTED = 12
 
 REFORM_PROMPT = """Ты готовишь поисковый запрос для базы философских цитат и стихов.
@@ -56,11 +61,11 @@ def _norm(s):
     return s.lower().replace("ё", "е")
 
 
-# ---------- фасет автора ----------
+# ---------- author facet ----------
 
 def author_index(cache_path=None):
-    """{нормализованная фамилия: каноническое имя} из подписанных авторов."""
-    if cache_path is None:  # глобаль в момент вызова, не дефолт при импорте
+    """{normalized surname: canonical name} from the signed authors."""
+    if cache_path is None:  # the global at call time, not an import-time default
         cache_path = NORM_CACHE
     if not os.path.exists(cache_path):
         return {}
@@ -71,14 +76,15 @@ def author_index(cache_path=None):
         if not it.get("author"):
             continue
         surname = _norm(it["author"]).split()[-1]
-        if len(surname) >= 4:  # короткие (Гёте, Кант) ловит dense и без фасета
+        if len(surname) >= 4:  # short ones (Гёте, Кант) dense handles fine without a facet
             idx.setdefault(surname, it["author"])
     return idx
 
 
 def match_author(query, idx):
-    """Ищет фамилию автора в запросе (склонения — префиксом: «пастернака»
-    начинается с «пастернак»). Возвращает (имя|None, запрос без слов автора)."""
+    """Looks for an author surname in the query (declensions by prefix:
+    «пастернака» starts with «пастернак»). Returns (name|None, the query
+    without the author's words)."""
     tokens = re.findall(r"[а-яёa-z0-9-]+", _norm(query))
     keep, hit = [], None
     for tok in tokens:
@@ -98,10 +104,11 @@ def strip_stopwords(query):
     return " ".join(toks)
 
 
-# ---------- переформулировка (единственный LLM-слой роутера) ----------
+# ---------- reformulation (the router's only LLM layer) ----------
 
 def reformulate(text, model="deepseek-v4-flash"):
-    """Разговорный запрос -> компактный поисковый. Сбой — None (не падляем)."""
+    """A conversational query -> a compact search query. A failure — None
+    (no crash)."""
     import urllib.request
     body = json.dumps({
         "model": model,
@@ -124,27 +131,28 @@ def reformulate(text, model="deepseek-v4-flash"):
         raw = resp["choices"][0]["message"]["content"]
         raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.M).strip()
         return json.loads(raw).get("query") or None
-    except Exception:  # noqa: BLE001 — роутер живёт и без LLM
+    except Exception:  # noqa: BLE001 — the router lives on without the LLM too
         return None
 
 
-# ---------- маршрутизация ----------
+# ---------- routing ----------
 
 def route(text, allow_llm=True):
-    """Текст пользователя -> маршрут для бота.
+    """The user's text -> a route for the bot.
 
-    {"intent": "search", "query": ..., "author": имя|None, "path": "direct|llm"}
+    {"intent": "search", "query": ..., "author": name|None, "path": "direct|llm"}
     intent: search | admin | intro.
-    allow_llm=False — переформулировку не зовём (сырой путь, как при сбое LLM):
-    бот проверяет дневной лимит ДО route, чтобы исчерпавший его пользователь
-    не жёг flash на переформулировке (intro/admin и без того идут до LLM).
+    allow_llm=False — don't call the reformulation (the raw path, same as
+    on an LLM failure): the bot checks the daily limit BEFORE route, so a
+    user who spent it doesn't burn flash on reformulation (intro/admin go
+    before the LLM anyway).
     """
     t = text.strip()
 
     first_line = t.split("\n", 1)[0].strip()
     if first_line.startswith("/"):
-        # команда — ровно первая строка; «/resync\nмусор» — это текст,
-        # многострочные вставки не должны попадать в админский интент
+        # a command is exactly the first line; "/resync\ngarbage" is text;
+        # multi-line pastes must not fall into the admin intent
         return {"intent": "admin", "query": ""}
 
     if INTRO_RE.match(t):
@@ -154,27 +162,27 @@ def route(text, allow_llm=True):
     author, rest = match_author(t, idx)
     rest = strip_stopwords(rest)
 
-    # дословный фрагмент в кавычках: без переформулировки (точная фраза
-    # дороже компактности) — wants_lexical в hybrid подхватит кавычки
+    # a literal fragment in quotes: no reformulation (the exact phrase
+    # beats compactness) — wants_lexical in hybrid picks up the quotes
     if '"' in t or "«" in t:
         return {"intent": "search", "query": rest or t.strip('"«» '),
                 "author": author, "path": "direct-quoted"}
 
     if len(rest.split()) > MAX_WORDS_QUOTED:
-        # простыня текста — дословный фрагмент без кавычек: реформулировка
-        # не нужна (точная фраза дороже компактности), LLM не зовём —
-        # иначе кидание больших текстов жгло бы токены на ровном месте
+        # a wall of text — a literal fragment without quotes: no
+        # reformulation needed (the exact phrase beats compactness), no
+        # LLM — otherwise pasting big texts would burn tokens for nothing
         return {"intent": "search", "query": rest or t,
                 "author": author, "path": "direct-quoted"}
 
     if len(rest.split()) <= MAX_WORDS_DIRECT:
-        # короткий: как есть; только автор — ищем его самого
+        # short: as is; just an author — search for the author himself
         return {"intent": "search", "query": rest or (author or ""),
                 "author": author, "path": "direct"}
 
     q = reformulate(t) if allow_llm else None
     if q:
-        # переформулировка могла занести/потерять автора — сверяем фасет ещё раз
+        # the reformulation could add or drop the author — match the facet once more
         author2, rest2 = match_author(q, idx)
         if author2 and not author:
             author, rest = author2, strip_stopwords(rest2)
@@ -183,16 +191,16 @@ def route(text, allow_llm=True):
     return {"intent": "search", "query": rest, "author": author, "path": "direct-fallback"}
 
 
-# ---------- выдача с фильтрами продукта ----------
+# ---------- search with product filters ----------
 
 def search_cards(route_, k=5):
-    """Поиск по маршруту + фильтры kind и автора. -> [(пост, скор, путь)]"""
+    """Search by route + kind and author filters. -> [(post, score, path)]"""
     import hybrid
     import cards
 
     order, posts, dense, bm_scores, path = hybrid.retrieve(route_["query"], n=max(200, k * 4))
-    items = cards.load_norm()  # с курируемыми метаданными детей склеек
-    # фамилия фасета: пост проходит, если автор подписан ИЛИ канал пересылки
+    items = cards.load_norm()  # with the curated metadata of split children
+    # the facet surname: a post passes if the author is signed OR the channel forwarded it
     surname = _norm(route_.get("author") or "").split()[-1] if route_.get("author") else ""
 
     out = []

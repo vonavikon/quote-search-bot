@@ -1,8 +1,9 @@
-"""TG-бот поиска цитат по своему корпусу: карточки с картиной, случайная
-выдача, справки об авторах, живой ингест из канала. Long polling (webhook
-требует домен и TLS-роут, здесь не нужен). Запуск: python -X utf8 bot.py.
+"""Telegram bot that searches quotes in its own corpus: cards with a
+painting, random deals, reference cards about authors, live ingest from
+the channel. Long polling (a webhook needs a domain and a TLS route, not
+needed here). Run: python -X utf8 bot.py.
 
-Env (или .env рядом): TG_BOT_TOKEN, ADMIN_TG_ID.
+Env (or a .env next to this file): TG_BOT_TOKEN, ADMIN_TG_ID.
 """
 import asyncio
 import html
@@ -48,8 +49,8 @@ TOKEN = _env("TG_BOT_TOKEN")
 ADMIN = int(_env("ADMIN_TG_ID") or 0)
 DECKS = {}          # key -> {"cards": [...], "query": str}
 DECK_CAP = 300
-CAPTION_MAX = 1000  # лимит подписи к фото 1024, запас на разметку
-DAY_LIMIT = 100     # защитный дневной лимит платящих действий на пользователя
+CAPTION_MAX = 1000  # photo caption limit is 1024; headroom for markup
+DAY_LIMIT = 100     # safety daily cap of paid (LLM) actions per user
 
 RATE_LIMIT_TEXT = ("На сегодня всё: лимит 100 запросов исчерпан. "
                    "Возвращайся завтра — цитаты никуда не денутся.")
@@ -65,9 +66,9 @@ INTRO_IMG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 
 async def send_intro(m: Message, bot: Bot):
-    """/start и интро: картинка с приветствием (intro.jpg, если есть)
-    + кнопка Sic. file_id кэшируем — после первой отправки летает id
-    без загрузки. Файла нет — просто текст."""
+    """/start and intro: a picture with the greeting (intro.jpg if present)
+    + the Sic button. We cache file_id — after the first send only the id
+    travels, no upload. No file — plain text."""
     fid = images.get_file_id("intro")
     if fid or os.path.exists(INTRO_IMG):
         media = fid or FSInputFile(INTRO_IMG)
@@ -79,8 +80,9 @@ async def send_intro(m: Message, bot: Bot):
     await m.answer(INTRO, parse_mode="HTML", reply_markup=sic_kb(),
                    disable_web_page_preview=True)
 
-# Уточнение однословников: при пустом результате предлагаем темы кнопками.
-# Фасеты — теги манифеста картин (детерминированно, без LLM).
+# Clarification for one-word queries: when the result is empty we offer
+# theme buttons. Facets are tags from the painting manifest (deterministic,
+# no LLM).
 THEMES = ("одиночество", "любовь", "смерть", "вера", "дорога", "ночь", "море", "свет")
 
 
@@ -88,22 +90,22 @@ def clarify_kb():
     b = InlineKeyboardBuilder()
     for t in THEMES:
         b.button(text=t.capitalize(), callback_data=f"t:{t}")
-    b.button(text="Sic erat in fatis", callback_data="sic")  # всегда под рукой
+    b.button(text="Sic erat in fatis", callback_data="sic")  # always at hand
     b.adjust(4, 4, 1)
     return b.as_markup()
 
 
 def sic_kb():
-    """Кнопка случайной карточки — в /start и интро текстом."""
+    """Random-card button — in /start and the intro, as text."""
     b = InlineKeyboardBuilder()
     b.button(text="Sic erat in fatis", callback_data="sic")
     return b.as_markup()
 
 
-# ---------- отклик: индикатор «печатает…» на всё время поиска ----------
+# ---------- feedback: the "typing..." indicator for the whole search ----------
 
 async def _keep_typing(bot: Bot, chat_id):
-    """Chat action живёт ~5 секунд — продлеваем, пока идёт поиск."""
+    """A chat action lives ~5 seconds — keep renewing it while the search runs."""
     try:
         while True:
             await bot.send_chat_action(chat_id, "typing")
@@ -113,33 +115,34 @@ async def _keep_typing(bot: Bot, chat_id):
 
 
 def search_status(path, query):
-    """Текст живого статуса поиска. Путь уже известен роутеру, врём только
-    словом «ищу»: сам embed-запрос внутри hybrid.retrieve не виден."""
+    """Live search status text. The router has already picked the path; the
+    only fib is the word "searching": the embed request inside
+    hybrid.retrieve is not shown."""
     how = "дословно" if path == "direct-quoted" else "по смыслу"
     return f"Ищу {how}: «{query}»..."
 
 
 async def _send_later(m: Message, text: str, box: list, delay: float = 0.9):
-    """Статус поиска появляется, только если поиск затянулся: быстрые ответы
-    не мигают сообщением-призраком. Отправленное кладётся в box."""
+    """The search status appears only if the search drags on: fast replies
+    don't flash a ghost message. Whatever was sent goes into box."""
     await asyncio.sleep(delay)
     box.append(await m.answer(text))
 
 
 async def _drop(box: list):
-    """Убрать статус поиска, если он успел появиться."""
+    """Remove the search status if it managed to appear."""
     if box:
         try:
             await box[0].delete()
-        except Exception:  # noqa: BLE001 — статус не критичен
+        except Exception:  # noqa: BLE001 — the status is not critical
             pass
 
 
 def diversify(cs):
-    """Разводит авторов по очереди: две карточки одного автора не идут подряд.
+    """Interleaves authors: two cards by the same author never come in a row.
 
-    Группирует по автору (None — «не подписан» тоже группа) и раздаёт
-    round-robin, внутри группы порядок релевантности сохраняется.
+    Groups by author (None — "unsigned" is a group too) and deals them
+    round-robin; within a group the relevance order is preserved.
     """
     groups = {}
     for c in cs:
@@ -154,10 +157,10 @@ def diversify(cs):
     return out
 
 
-# ---------- колоды и клавиатура ----------
+# ---------- decks and keyboard ----------
 
 def new_deck(cs, query):
-    if len(DECKS) >= DECK_CAP:  # FIFO: старые колоды вылетают
+    if len(DECKS) >= DECK_CAP:  # FIFO: old decks get evicted
         DECKS.pop(next(iter(DECKS)))
     key = f"{random.getrandbits(48):012x}"
     DECKS[key] = {"cards": cs, "query": query, "used": set()}
@@ -177,7 +180,7 @@ def kb(key, i, truncated=False, similar=False):
     if similar:
         b.button(text="Похожая цитата", callback_data=f"l:{key}:{i}")
         rows.append(1)
-    # справки: Википедия + данные корпуса, без свободной генерации (reference)
+    # reference cards: Wikipedia + corpus data, no free generation (reference)
     b.button(text="Об авторе", callback_data=f"a:{key}:{i}")
     b.button(text="О картине", callback_data=f"p:{key}:{i}")
     rows.append(2)
@@ -187,24 +190,25 @@ def kb(key, i, truncated=False, similar=False):
     return b.as_markup()
 
 
-# ---------- отрисовка карточки: картина + текст (три порога длины) ----------
+# ---------- card rendering: painting + text (three length thresholds) ----------
 
 async def card_media(bot: Bot, painting):
-    """file_id из кэша (без загрузки) либо файл пула с диска."""
+    """file_id from the cache (no upload) or the pool file from disk."""
     fid = images.get_file_id(painting["id"])
     return fid or FSInputFile(images.painting_path(painting))
 
 
 def _remember_file_id(painting, msg):
-    """После отправки Telegram даёт файлу file_id — кэшируем, дальше летает id."""
+    """After a send Telegram assigns the file a file_id — we cache it, from
+    then on only the id travels."""
     if getattr(msg, "photo", None):
         images.save_file_id(painting["id"], msg.photo[-1].file_id)
 
 
 def _caption(c, painting, full=False):
-    """Подпись сообщения: текст карточки (HTML-экранированный) + автор +
-    источник + строка картины курсивом. Отдельным абзацем, с пустой строкой —
-    чтобы подпись автора не склеивалась с подписью картины."""
+    """Message caption: the card text (HTML-escaped) + author + source +
+    the painting line in italics. As a separate paragraph with a blank line —
+    so the author signature never sticks to the painting caption."""
     body = html.escape(cards.card_text(c, full=full))
     label = f"Картина: {painting['author']}, «{painting['title']}»"
     if painting.get("year"):
@@ -213,17 +217,18 @@ def _caption(c, painting, full=False):
 
 
 async def send_card(m: Message, bot: Bot, c, key, i, similar=False, user_id=None):
-    """Карточка целиком. <=1000 знаков: картина + подпись одним сообщением;
-    длиннее: картина отдельно, текст с кнопками отдельным сообщением.
-    Картина не повторяется ни внутри колоды, ни с последними показанными
-    пользователю (images.pick с exclude); выбранная запоминается в колоде —
-    кнопка «О картине» смотрит на неё, а в events уходит и картина."""
+    """The card in full. <=1000 chars: painting + caption in one message;
+    longer: painting separately, text with buttons in its own message.
+    A painting never repeats within a deck or among the ones recently shown
+    to the user (images.pick with exclude); the chosen one is remembered in
+    the deck — the "About the painting" button looks at it, and both the
+    card and the painting go into events."""
     deck = DECKS[key]
     exclude = set(deck["used"])
     if user_id:
         try:
             exclude |= store.shown_paintings(user_id)
-        except Exception:  # noqa: BLE001 — память не критична
+        except Exception:  # noqa: BLE001 — the memory is not critical
             log.exception("память картин не прочиталась")
     painting = images.pick(c["id"], deck.get("query", ""), exclude=exclude,
                            text=c.get("text", ""))
@@ -249,10 +254,10 @@ async def send_card(m: Message, bot: Bot, c, key, i, similar=False, user_id=None
 
 
 def similar_branch(text, not_id, seen):
-    """Ветка похожих цитат: dense-поиск по тексту текущей карточки.
-    Себя и всё показанное пользователю (seen) пропускает; когда ближайшие
-    исчерпаны, просто идёт дальше по списку — до 5 непрочитанных.
-    -> [posts], может быть пустым."""
+    """Similar-quotes branch: dense search over the current card's text.
+    Skips itself and everything the user has seen (seen); when the nearest
+    are exhausted it just walks further down the list — up to 5 unread.
+    -> [posts], possibly empty."""
     found = search_cards({"query": text[:400], "author": None}, 8)
     out = []
     for p, _, _ in found:
@@ -265,9 +270,10 @@ def similar_branch(text, not_id, seen):
 
 
 def random_branch(user_id):
-    """Случайная ветка: непоказанный случайный пост + его ближайшие соседи
-    (тоже непоказанные) — колода для Sic и фолбэка «похожей». Всё прочитано —
-    берём из всего пула. Синхронная (search_cards), зовётся в executor."""
+    """Random branch: an unshown random post + its nearest neighbors (also
+    unshown) — a deck for Sic and the "similar" fallback. Everything read —
+    pick from the whole pool. Synchronous (search_cards), called in an
+    executor."""
     items = cards.load_norm()
     pool = [p for p in load_posts()
             if items.get(str(p["id"]), {}).get("kind", "quote") in PUBLIC_KINDS]
@@ -280,7 +286,7 @@ def random_branch(user_id):
     out = [seed]
     try:
         found = search_cards({"query": seed["text"][:400], "author": None}, 8)
-    except Exception:  # noqa: BLE001 — соседей нет, живём одним постом
+    except Exception:  # noqa: BLE001 — no neighbors, live on a single post
         found = []
     for p, _, _ in found:
         if p["id"] != seed["id"] and p["id"] not in seen:
@@ -290,19 +296,19 @@ def random_branch(user_id):
     return out
 
 
-# ---------- справки об авторе и картине (по кнопке, reference.py) ----------
+# ---------- author and painting reference cards (on button, reference.py) ----------
 
-STREAM_THROTTLE = 0.9  # правка сообщения не чаще ~1/с (флуд-лимит edit_text)
+STREAM_THROTTLE = 0.9  # edit a message no more than ~1/s (edit_text flood limit)
 
 
 async def send_reference(m: Message, fn, args):
-    """Справка со стримингом: сборка идёт в пуле потоков (синхронный вызов
-    заморозил бы весь бот), текст дописывается в сообщение правками раз в
-    STREAM_THROTTLE. Кэш-хиты и заглушки возвращаются мгновенно — одна
-    финальная правка, без пустого мигания."""
+    """Reference card with streaming: assembly runs in a thread pool (a
+    synchronous call would freeze the whole bot), the text is appended to
+    the message by edits once per STREAM_THROTTLE. Cache hits and stubs
+    return instantly — a single final edit, no empty blinking."""
     loop = asyncio.get_running_loop()
     msg = await m.answer("Собираю справку...")
-    buf: list = []  # поток дописывает куски, мы читаем: append атомарен
+    buf: list = []  # the stream appends chunks, we read them: append is atomic
     task = loop.run_in_executor(None, lambda: fn(*args, on_chunk=buf.append))
     shown = ""
     while not task.done():
@@ -312,7 +318,7 @@ async def send_reference(m: Message, fn, args):
             shown = text
             try:
                 await msg.edit_text(text[:4000])
-            except Exception:  # noqa: BLE001 — not modified или флуд
+            except Exception:  # noqa: BLE001 — not modified or flood
                 pass
     try:
         await msg.edit_text((await task)[:4000])
@@ -320,7 +326,7 @@ async def send_reference(m: Message, fn, args):
         pass
 
 
-# ---------- хендлеры ----------
+# ---------- handlers ----------
 
 async def on_start(m: Message, bot: Bot):
     await send_intro(m, bot)
@@ -331,19 +337,21 @@ def is_admin(m: Message) -> bool:
 
 
 def rate_ok(uid) -> bool:
-    """Дневной лимит «платящих» действий (поиск / пояснение / похожая / справки).
-    Считаются только вызовы модели; «Ещё цитата», Sic, «Читать полностью» —
-    локальные. Админ — без лимита, чтобы отладка не упиралась."""
+    """Daily cap on "paid" actions (search / explanation / similar /
+    reference cards). Only model calls count; "Ещё цитата", Sic, "Читать
+    полностью" are local. The admin has no cap, so debugging doesn't hit
+    it."""
     if not uid or uid == ADMIN:
         return True
     return store.rate_incr(uid) <= DAY_LIMIT
 
 
 def rate_left(uid) -> bool:
-    """Остаток лимита без инкремента — для проверки ДО route: исчерпавший
-    лимит пользователь не должен жечь LLM-переформулировку. intro/admin
-    определяются роутером до LLM и лимит не тратят, счётчик растёт только
-    на платящем действии (rate_ok внутри do_search)."""
+    """Limit remainder without an increment — for the check BEFORE route:
+    a user who spent the limit must not burn an LLM reformulation.
+    intro/admin are detected by the router before the LLM and spend
+    nothing; the counter grows only on a paid action (rate_ok inside
+    do_search)."""
     if not uid or uid == ADMIN:
         return True
     return store.rate_count(uid) < DAY_LIMIT
@@ -381,17 +389,19 @@ async def on_document(m: Message, bot: Bot):
 
 
 def channel_gap(last_id, new_id):
-    """Пропущенные id постов канала между последним увиденным и текущим.
-    [] — пропусков нет (или первое сообщение после старта: last неизвестен)."""
+    """Channel post ids missed between the last one seen and the current.
+    [] — nothing is missing (or the first message after startup: last is
+    unknown)."""
     if not last_id or new_id <= last_id + 1:
         return []
     return list(range(last_id + 1, new_id))
 
 
 async def on_channel_post(m: Message, bot: Bot):
-    """Живой ингест: новые посты и правки канала (бот — админ канала).
-    Зарегистрирован без фильтра на текст: пост без текста в ингест не
-    попадает, но его message_id учитывается — иначе он выглядел бы пропуском."""
+    """Live ingest: new channel posts and edits (the bot is a channel
+    admin). Registered without a text filter: a textless post does not get
+    ingested, but its message_id is counted — otherwise it would look like
+    a gap."""
     last = int(store.get_state("last_channel_id") or 0)
     if m.message_id > last:
         store.set_state("last_channel_id", str(m.message_id))
@@ -411,8 +421,9 @@ async def on_channel_post(m: Message, bot: Bot):
         return
     post = {"id": m.message_id, "date": m.date.strftime("%Y-%m-%d"),
             "author": "", "text": text}
-    try:  # ингест минутный (embed + LLM-нормализация) — только в пуле потоков,
-        # синхронный вызов заморозил бы event loop и весь бот целиком
+    try:  # ingest takes a minute (embed + LLM normalization) — thread pool
+        # only; a synchronous call would freeze the event loop and the
+        # whole bot with it
         loop = asyncio.get_running_loop()
         r = await loop.run_in_executor(None, ingest.add_posts, [post])
         log.info("channel_post %s: %s", m.message_id, r)
@@ -425,21 +436,23 @@ async def on_channel_post(m: Message, bot: Bot):
 
 
 async def do_search(m: Message, bot: Bot, text, r=None):
-    """Поиск по любому тексту (запрос пользователя или кнопка-тема).
-    Пока идёт embed-запрос: «печатает…» плюс (дольше 0.9 с) живой статус
-    «Ищу по смыслу/дословно: запрос» — исчезает, когда карточка готова.
-    r — готовый маршрут из route(): on_text уже вычислил его, второй вызов
-    означал бы повторную LLM-переформулировку того же запроса."""
+    """Search over any text (the user's query or a theme button).
+    While the embed request runs: "typing..." plus (after 0.9 s) the live
+    status "Ищу по смыслу/дословно: query" — it disappears once the card is
+    ready. r is a ready route from route(): on_text has already computed
+    it; a second call would mean another LLM reformulation of the same
+    query."""
     loop = asyncio.get_running_loop()
-    if r is None:  # кнопка-тема: route в пуле (внутри файл чтения индекса авторов)
+    if r is None:  # theme button: run route in a pool (it reads the author index file)
         r = await loop.run_in_executor(
             None, lambda: route(text, allow_llm=rate_left(
                 m.from_user.id if m.from_user else None)))
     if r["intent"] != "search":
         return
     if not r["query"].strip():
-        # пустой после стоп-слов и фасета (эмодзи, «найди цитату») — это не
-        # запрос: сразу уточнение с кнопками тем, а не 5 случайных карточек
+        # empty after stopwords and the facet (emoji, "найди цитату") — this
+        # is not a query: clarify with theme buttons right away, not 5 random
+        # cards
         await m.answer("Не понял, о чём искать. Напиши тему («одиночество»), "
                        "имя автора или точную фразу в кавычках.",
                        reply_markup=clarify_kb())
@@ -464,11 +477,11 @@ async def do_search(m: Message, bot: Bot, text, r=None):
     if not found:
         empty = f"По «{r['query']}» ничего не нашёл. Попробуй короче: " \
                 f"тема («одиночество») или имя автора."
-        if prog:  # статус уже висит — превращаем его в ответ, а не мигаем
+        if prog:  # the status is already up — turn it into the answer instead of blinking
             try:
                 await prog[0].edit_text(empty, reply_markup=clarify_kb())
                 return
-            except Exception:  # noqa: BLE001 — правка не прошла, шлём новым
+            except Exception:  # noqa: BLE001 — the edit failed, send a new one
                 pass
         await m.answer(empty, reply_markup=clarify_kb())
         return
@@ -481,9 +494,10 @@ async def do_search(m: Message, bot: Bot, text, r=None):
 
 
 async def on_text(m: Message, bot: Bot):
-    # route в пуле: длинный запрос запускает LLM-переформулировку (urllib,
-    # до 30 с) — синхронный вызов замораживал бы весь бот. У исчерпавшего
-    # дневной лимит переформулировку отключаем: сначала проверка, потом route
+    # route in a pool: a long query triggers an LLM reformulation (urllib,
+    # up to 30 s) — a synchronous call would freeze the whole bot. For a
+    # user who spent the daily limit the reformulation is disabled: check
+    # first, then route
     loop = asyncio.get_running_loop()
     r = await loop.run_in_executor(
         None, lambda: route(m.text, allow_llm=rate_left(
@@ -500,8 +514,8 @@ async def on_text(m: Message, bot: Bot):
 async def on_callback(q: CallbackQuery, bot: Bot):
     data = q.data or ""
     if data == "sic":
-        # случайная ветка из непоказанных: колода из ~5 карточек, чтобы
-        # «Ещё цитата» жила и после Sic (раньше колода была из одной)
+        # a random branch of unshown posts: a deck of ~5 cards so that
+        # "Ещё цитата" survives Sic too (the deck used to hold a single card)
         branch = await asyncio.get_running_loop().run_in_executor(
             None, random_branch, q.from_user.id)
         items = cards.load_norm()
@@ -510,7 +524,7 @@ async def on_callback(q: CallbackQuery, bot: Bot):
         await send_card(q.message, bot, cs[0], key, 0,
                         similar=True, user_id=q.from_user.id)
         return await q.answer()
-    if data.startswith("t:"):  # кнопка-тема из уточнения
+    if data.startswith("t:"):  # theme button from the clarification prompt
         await q.answer()
         return await do_search(q.message, bot, data[2:])
     _, key, idx = (data.split(":") + ["", ""])[:3]
@@ -518,14 +532,14 @@ async def on_callback(q: CallbackQuery, bot: Bot):
     if not deck:
         return await q.answer("Колода устарела, поищи заново", show_alert=True)
     cs = deck["cards"]
-    # isdigit() пропускает юникодные «цифры» (²) — int() от них падает;
-    # только ASCII-цифры
+    # isdigit() passes unicode "digits" (²) — int() on them raises;
+    # ASCII digits only
     i = int(idx) % len(cs) if idx.isascii() and idx.isdigit() and cs else 0
-    if data[0] == "n":  # следующая цитата колоды
+    if data[0] == "n":  # next card in the deck
         i = (i + 1) % len(cs)
         await send_card(q.message, bot, cs[i], key, i, user_id=q.from_user.id)
         return await q.answer()
-    if data[0] == "l":  # похожая цитата: ветка ближайших соседей без повторов
+    if data[0] == "l":  # similar quote: a branch of nearest neighbors without repeats
         if not rate_ok(q.from_user.id):
             return await q.answer(RATE_LIMIT_TEXT, show_alert=True)
         await q.answer("ищу похожую...")
@@ -533,7 +547,7 @@ async def on_callback(q: CallbackQuery, bot: Bot):
         typing = asyncio.create_task(_keep_typing(bot, q.message.chat.id))
         try:
             seen = store.shown_posts(q.from_user.id)
-        except Exception:  # noqa: BLE001 — память не критична
+        except Exception:  # noqa: BLE001 — the memory is not critical
             seen = set()
         try:
             branch = await loop.run_in_executor(
@@ -543,7 +557,7 @@ async def on_callback(q: CallbackQuery, bot: Bot):
             branch = []
         finally:
             typing.cancel()
-        if not branch:  # ближайшие исчерпаны — рандомная непоказанная ветка
+        if not branch:  # nearest exhausted — a random unshown branch
             try:
                 branch = await loop.run_in_executor(
                     None, random_branch, q.from_user.id)
@@ -557,10 +571,10 @@ async def on_callback(q: CallbackQuery, bot: Bot):
         await send_card(q.message, bot, cs2[0], key2, 0,
                         similar=True, user_id=q.from_user.id)
         return
-    if data[0] == "f":  # читать полностью
+    if data[0] == "f":  # read in full
         await q.message.answer(cards.card_text(cs[i], full=True))
         return await q.answer()
-    if data[0] in "ap":  # справка: об авторе / о картине (reference.py)
+    if data[0] in "ap":  # reference: about the author / the painting (reference.py)
         if not rate_ok(q.from_user.id):
             return await q.answer(RATE_LIMIT_TEXT, show_alert=True)
         await q.answer()
@@ -584,10 +598,10 @@ async def on_callback(q: CallbackQuery, bot: Bot):
 async def main():
     if not TOKEN:
         raise SystemExit("TG_BOT_TOKEN не найден (env или .env)")
-    try:  # досшиваем векторы новых постов сразу; embedding-API иногда
-        # роняет соединение на заливке больших батчей — поэтому несколько
-        # попыток; после последней не роняем старт, первый поиск дошьёт сам
-        # (индекс инкрементален)
+    try:  # catch up vectors for new posts right away; the embedding API
+        # sometimes drops the connection on big batch uploads — hence several
+        # attempts; after the last one we don't kill startup, the first
+        # search finishes the job (the index is incremental)
         import index
         for attempt in range(3):
             try:
@@ -602,10 +616,10 @@ async def main():
                 await asyncio.sleep(15)
     except Exception:  # noqa: BLE001
         log.exception("стартовая досшивка индекса не удалась")
-    try:  # семантическая карта картин: дошиваем новые посты (без векторов
-        # в рантайме — один embed_query на новый пост, потом только json).
-        # Только карточные kind — reflection карточкой не становится,
-        # шить его в карту бессмысленно
+    try:  # semantic painting map: catch up new posts (no vectors stored
+        # at runtime — one embed_query per new post, then json only).
+        # Card kinds only — a reflection never becomes a card, sewing it
+        # into the map is pointless
         norm = cards.load_norm()
         added = images.extend_painting_map(
             {p["id"]: p["text"] for p in load_posts()
@@ -614,7 +628,7 @@ async def main():
             log.info("painting_map: дошито %s постов", added)
     except Exception:  # noqa: BLE001
         log.exception("досшивка painting_map не удалась")
-    mig = store.migrate()  # SQLite — зеркало корпуса, синк на каждом старте
+    mig = store.migrate()  # SQLite is a mirror of the corpus, synced on every start
     log.info("SQLite: %s", mig)
     bot = Bot(TOKEN)
     dp = Dispatcher()

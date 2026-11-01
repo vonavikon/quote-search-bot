@@ -1,12 +1,14 @@
-"""SQLite — источник истины для корпуса и метаданных.
+"""SQLite — the source of truth for the corpus and its metadata.
 
-Таблица posts идемпотентна по post_id: повторная миграция/ингест не меняет
-строку, если текст и нормализация не изменились. Поиск по-прежнему идёт по
-векторам (corpus.npz) и corpus_meta.json — SQLite хранит канон: что есть
-в базе и с какими метками, включая историю обновлений (updated_at).
+The posts table is idempotent by post_id: a repeated migration/ingest
+does not touch a row unless the text or the normalization changed.
+Search still runs over the vectors (corpus.npz) and corpus_meta.json —
+SQLite holds the canon: what is in the base and with which labels,
+including the update history (updated_at).
 
-Путь к базе берётся из load_corpus.DATA_DIR в момент вызова (не при импорте:
-иначе дефолт аргумента фиксирует путь до патча теста).
+The database path is taken from load_corpus.DATA_DIR at call time (not
+at import: otherwise a default argument would freeze the path before the
+test's monkeypatching).
 """
 import os
 import sqlite3
@@ -63,9 +65,9 @@ def db_path():
 def connect():
     con = sqlite3.connect(db_path())
     con.executescript(_SCHEMA)
-    # CREATE IF NOT EXISTS не расширяет существующую таблицу — у базы,
-    # живущей с первой версии, нет painting_id (добавлен 2026-09-28 для
-    # неповтора картин между колодами)
+    # CREATE IF NOT EXISTS does not extend an existing table — a base
+    # living since the first version lacks painting_id (added 2026-09-28
+    # for no-repeat paintings across decks)
     cols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if "painting_id" not in cols:
         con.execute("ALTER TABLE events ADD COLUMN painting_id TEXT")
@@ -78,7 +80,8 @@ def _now():
 
 
 def upsert(con, posts, items=None):
-    """Посты (+ записи нормализации по str(post_id)) -> SQLite. -> число изменённых."""
+    """Posts (+ normalization records by str(post_id)) -> SQLite.
+    -> the number of changed rows."""
     items = items or {}
     changed = 0
     for p in posts:
@@ -109,12 +112,13 @@ def upsert(con, posts, items=None):
 
 
 def migrate(con=None):
-    """Синхронизирует базу с corpus_meta.json + normalization.json.
+    """Syncs the base with corpus_meta.json + normalization.json.
 
-    Идемпотентный зеркальный синк на каждом старте: дошил посты (включая
-    детей склеек — их метаданные из cards.load_norm()), удалил исчезнувшие
-    id (разобранные склейки-родители). -> {"migrated": bool, "posts": n},
-    migrated=True, если база была пуста (первый посев).
+    An idempotent mirror sync on every start: adds missing posts
+    (including split children — their metadata comes from
+    cards.load_norm()), removes vanished ids (disassembled glue
+    parents). -> {"migrated": bool, "posts": n}, migrated=True when the
+    base was empty (the first seed).
     """
     own = con is None
     con = con or connect()
@@ -129,7 +133,7 @@ def migrate(con=None):
         if keep:
             ph = ",".join("?" * len(keep))
             con.execute(f"DELETE FROM posts WHERE post_id NOT IN ({ph})", keep)
-        else:  # пустой корпус: NOT IN () — синтаксическая ошибка SQL
+        else:  # an empty corpus: NOT IN () is an SQL syntax error
             con.execute("DELETE FROM posts")
         con.commit()
         return {"migrated": not n, "posts": len(posts)}
@@ -139,7 +143,7 @@ def migrate(con=None):
 
 
 def counts(con=None):
-    """Сводка для /stats: всего, подписанных авторов, литературных kind."""
+    """Summary for /stats: total, signed authors, literary kinds."""
     own = con is None
     con = con or connect()
     try:
@@ -156,8 +160,8 @@ def counts(con=None):
 
 
 def log_event(user_id, post_id, painting_id=None, con=None):
-    """Выдана карточка пользователю (телеметрия /stats + память показов:
-    пост и картина). Append-only."""
+    """A card was dealt to a user (/stats telemetry + the shown-memory:
+    the post and the painting). Append-only."""
     own = con is None
     con = con or connect()
     try:
@@ -170,15 +174,16 @@ def log_event(user_id, post_id, painting_id=None, con=None):
             con.close()
 
 
-# сколько последних картин пользователя исключается из подбора: достаточно,
-# чтобы развернуть концентрацию семантической карты (топ-5 картин закрывают
-# четверть слотов), и меньше пула — перебор вперёд всегда находит свободную
+# how many of the user's recent paintings are excluded from selection:
+# enough to unwind the semantic map's concentration (top-5 paintings
+# cover a quarter of the slots), and less than the pool — the forward
+# walk always finds a free one
 RECENT_PAINTINGS = 150
 
 
 def shown_posts(user_id, con=None):
-    """Посты, уже выданные пользователю. -> set (память неповтора для
-    «похожей» и Sic; у новичка пуст)."""
+    """Posts already dealt to the user. -> set (the no-repeat memory for
+    "similar" and Sic; empty for a newcomer)."""
     own = con is None
     con = con or connect()
     try:
@@ -190,8 +195,8 @@ def shown_posts(user_id, con=None):
 
 
 def shown_paintings(user_id, limit=RECENT_PAINTINGS, con=None):
-    """Последние картины, выданные пользователю (limit штук по свежести).
-    -> set id картин — exclude для images.pick."""
+    """The user's most recent paintings (limit of them, freshest first).
+    -> set of painting ids — the exclude for images.pick."""
     own = con is None
     con = con or connect()
     try:
@@ -205,7 +210,7 @@ def shown_paintings(user_id, limit=RECENT_PAINTINGS, con=None):
 
 
 def usage(con=None):
-    """Аудитория: уникальные пользователи и число выданных карточек."""
+    """Audience: unique users and the number of cards dealt."""
     own = con is None
     con = con or connect()
     try:
@@ -218,7 +223,7 @@ def usage(con=None):
 
 
 def get_state(k, con=None):
-    """Значение ключа из state (last_channel_id и прочее). |None."""
+    """The value of a state key (last_channel_id and the like). |None."""
     own = con is None
     con = con or connect()
     try:
@@ -242,14 +247,15 @@ def set_state(k, v, con=None):
 
 
 def msk_day():
-    """Текущий день по Москве (дневные лимиты живут по часовой зоне аудитории)."""
+    """The current day in Moscow (daily limits live in the audience's timezone)."""
     return datetime.now(MSK).strftime("%Y-%m-%d")
 
 
 def rate_count(user_id, day=None, con=None):
-    """Сколько платящих действий у пользователя за день. Только чтение,
-    счётчик не инкрементирует — для проверки ДО вызова route: LLM-переформулировка
-    не должна звестись у исчерпавшего лимит (сам лимит знает бот, не стор)."""
+    """How many paid actions the user has taken today. Read-only, no
+    increment — for the check BEFORE calling route: an LLM reformulation
+    must not run for a user who spent the limit (the limit itself is the
+    bot's business, not the store's)."""
     day = day or msk_day()
     own = con is None
     con = con or connect()
@@ -263,7 +269,7 @@ def rate_count(user_id, day=None, con=None):
 
 
 def rate_incr(user_id, day=None, con=None):
-    """+1 к дневному счётчику действий пользователя. -> новое значение счётчика."""
+    """+1 to the user's daily action counter. -> the new counter value."""
     day = day or msk_day()
     own = con is None
     con = con or connect()
@@ -282,7 +288,8 @@ def rate_incr(user_id, day=None, con=None):
 
 
 def log_llm(model, action, usage, con=None):
-    """LLM-вызов в копилку расходов (usage от bothub: токены + cost). Append-only."""
+    """An LLM call into the spend ledger (usage from bothub: tokens +
+    cost). Append-only."""
     own = con is None
     con = con or connect()
     try:
@@ -300,7 +307,7 @@ def log_llm(model, action, usage, con=None):
 
 
 def spend(con=None):
-    """Расходы за текущий месяц по МСК: {action: {"вызовов": n, "$": сумма}}."""
+    """Spend for the current month in MSK: {action: {"вызовов": n, "$": total}}."""
     own = con is None
     con = con or connect()
     try:

@@ -1,15 +1,15 @@
-"""LLM-нормализация корпуса минимальным срезом: kind, author, source.
-Правило доверия: автор и источник ТОЛЬКО из явной подписи в тексте поста.
-Угадывание по стилю/узнаваемости запрещено — мисатрибуция цитаты хуже
-пропуска автора. Защита на уровне кода: author/source затираются,
-если evidence != "signed".
+"""LLM normalization of the corpus with a minimal cut: kind, author, source.
+The trust rule: the author and the source come ONLY from an explicit
+signature in the post text. Guessing by style/recognition is forbidden —
+a misattributed quote is worse than a missing author. Enforced in code:
+author/source are wiped unless evidence == "signed".
 
-Публичность НЕ поле LLM: это правило продукта, kind in (quote, poem)
-проверяется в router.PUBLIC_KINDS при выдаче. origin (канал пересылки)
-берётся из экспорта без LLM.
+Public visibility is NOT an LLM field: it is a product rule, kind in
+(quote, poem) is checked in router.PUBLIC_KINDS at serving time. origin
+(forwarded channel) comes from the export without an LLM.
 
-Кэш normalization.json идемпотентен по post_id: повторный прогон
-добирает только новые посты, стоимость не накапливается.
+The normalization.json cache is idempotent by post_id: a re-run only
+picks up new posts, the cost does not accumulate.
 """
 import json
 import os
@@ -20,11 +20,11 @@ import urllib.request
 from embed import BASE, _key
 from load_corpus import DATA_DIR, load_posts, split_child_ids
 
-MODEL = "deepseek-v4-flash"  # выбор по мини-эвалу (согласие с pro при трети цены)
-PM, CM = 0.27, 1.10          # $/M токенов (bothub; уточнять при смене модели)
+MODEL = "deepseek-v4-flash"  # picked by a mini eval (agreement with pro at a third of the price)
+PM, CM = 0.27, 1.10          # $/M tokens (bothub; re-check when the model changes)
 CACHE = os.path.join(DATA_DIR, "normalization.json")
 BATCH = 15
-HEAD, TAIL, HARD_CAP = 700, 500, 1200  # подпись в конце: хвост обязателен
+HEAD, TAIL, HARD_CAP = 700, 500, 1200  # the signature is at the end: the tail is mandatory
 
 KINDS = ("quote", "poem", "reflection")
 
@@ -47,7 +47,7 @@ author_guess — если автор НЕ подписан, но ты узнал
 
 
 def clip(text):
-    """Длинные посты: голова + хвост (подпись автора всегда в конце)."""
+    """Long posts: head + tail (the author signature is always at the end)."""
     if len(text) <= HARD_CAP:
         return text
     return text[:HEAD] + "\n[...сокращено...]\n" + text[-TAIL:]
@@ -76,8 +76,9 @@ def call(model, posts):
     raw = data["choices"][0]["message"]["content"]
     raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.M).strip()
     items = json.loads(raw)["posts"]
-    # жёсткая гарантия правила доверия: без подписи автора нет (source живёт
-    # своей подписью — произведение может быть названо без автора)
+    # a hard guarantee of the trust rule: no signature — no author (the
+    # source lives by its own signature — a work can be named without an
+    # author)
     for it in items:
         if it.get("author_evidence") != "signed":
             it["author"] = None
@@ -95,11 +96,12 @@ def _norm(s):
 
 
 def enforce_trust(items, posts):
-    """Детерминированная проверка правила доверия поверх слов LLM:
-    заявленный author обязан встречаться в последних 2 строках поста —
-    хотя бы одним значимым словом (>= 4 букв, е/ё-нечувствительно; покрывает
-    склонения «Грасиана» и подпись фамилией «пастернак, 1956»). Иначе автор
-    не подписан: уходит в author_guess. Возвращает число понижений."""
+    """A deterministic check of the trust rule on top of the LLM's words:
+    the claimed author must occur in the last 2 lines of the post — by at
+    least one meaningful word (>= 4 letters, е/ё-insensitive; covers the
+    declension «Грасиана» and a surname-only signature «пастернак, 1956»).
+    Otherwise the author is not signed: demoted into author_guess.
+    Returns the number of demotions."""
     by_id = {p["id"]: p for p in posts}
     demoted = 0
     for pid, it in items.items():
@@ -126,19 +128,19 @@ def load_cache():
 
 
 def run(sample=None, model=MODEL):
-    """sample=N — прогнать только N случайных постов (для сверки глазами).
-    Возвращает (кэш, статистика)."""
+    """sample=N — run only N random posts (for eyeballing).
+    Returns (cache, stats)."""
     posts = load_posts()
     if sample:
         import random
         random.seed(42)
         posts = random.sample(posts, min(sample, len(posts)))
     cache = load_cache()
-    all_posts = load_posts()  # проверка доверия идёт по полному корпусу
+    all_posts = load_posts()  # the trust check runs over the full corpus
     demoted = enforce_trust(cache["items"], all_posts)
     if demoted:
         print(f"правило доверия: понижено в guess {demoted} авторов", file=sys.stderr)
-    # дети склеек не нормализуются LLM — их метаданные курирует splits.json
+    # split children are not normalized by the LLM — their metadata is curated by splits.json
     curated = split_child_ids()
     todo = [p for p in posts
             if str(p["id"]) not in cache["items"]
@@ -152,13 +154,13 @@ def run(sample=None, model=MODEL):
         cost = (usage.get("prompt_tokens", 0) / 1e6 * PM + usage.get("completion_tokens", 0) / 1e6 * CM) if usage else 0
         total_cost += cost
         import spend
-        # cost дописываем сами: OpenAI-совместимый usage поля не обязателен,
-        # без него телеметрия /stats молча показывала бы $0
+        # we append cost ourselves: an OpenAI-compatible usage field is
+        # optional, without it the /stats telemetry would silently show $0
         spend.log_call(model, "normalize", {**(usage or {}), "cost": cost})
         print(f"  батч {i // BATCH + 1}: {len(items)} постов, ${cost:.5f}", file=sys.stderr)
-        with open(CACHE, "w", encoding="utf-8") as f:  # писать после каждого батча
+        with open(CACHE, "w", encoding="utf-8") as f:  # write after every batch
             json.dump(cache, f, ensure_ascii=False, indent=1)
-    if demoted and not todo:  # ремонт кэша без новых постов — тоже сохранить
+    if demoted and not todo:  # a cache repair with no new posts — persist it too
         with open(CACHE, "w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False, indent=1)
     stats = summarize(cache, posts)
@@ -167,7 +169,7 @@ def run(sample=None, model=MODEL):
 
 def run_call(model, chunk):
     last = None
-    for _ in range(3):  # ретраи на битый JSON/таймаут
+    for _ in range(3):  # retries on broken JSON/timeout
         try:
             return call(model, chunk)
         except Exception as e:  # noqa: BLE001

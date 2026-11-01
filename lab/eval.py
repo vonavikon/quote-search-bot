@@ -1,12 +1,13 @@
-"""Мини-эвал 5 эмбеддинг-моделей на своём корпусе.
+"""A mini eval of 5 embedding models on our own corpus.
 
-Метрики (vs строгий ground truth — канонические посты по теме):
-  recall@5  — доля GT-постов, попавших в топ-5
-  hit@5     — доля запросов, где хоть один GT в топ-5
-  MRR       — среднее 1/ранг первого GT-поста (по полной выдаче, ранг с 1)
+Metrics (vs strict ground truth — the canonical posts per theme):
+  recall@5  — share of GT posts that made the top-5
+  hit@5     — share of queries where at least one GT is in the top-5
+  MRR       — mean 1/rank of the first GT post (over the full result,
+              rank starts at 1)
 
-Запуск:  python -X utf8 eval.py
-Корпус каждой модели кэшируется в eval_cache_<slug>.npz.
+Run:  python -X utf8 eval.py
+Each model's corpus is cached in eval_cache_<slug>.npz.
 """
 import os
 import re
@@ -26,11 +27,12 @@ MODELS = [
     ("bge-m3", 1024),
 ]
 
-# self-host модели: идут локально через embed_local, не через bothub.
+# self-hosted models: run locally via embed_local, not through bothub.
 LOCAL = {"bge-m3"}
 
-# Qwen3-Embedding — асимметричная instruction-tuned: запросу нужен префикс,
-# иначе эмбеддинг запроса деградирует (см. отчёт: recall 0.07 -> 0.56).
+# Qwen3-Embedding is an asymmetric instruction-tuned model: the query
+# needs a prefix, otherwise the query embedding degrades (see the
+# report: recall 0.07 -> 0.56).
 _QWEN_INST = ("Instruct: Given a user topic query, "
               "retrieve relevant quotes/passages on that theme.\nQuery: ")
 
@@ -40,7 +42,7 @@ def format_query(model, query):
 
 
 def embed_texts(texts, model):
-    """Диспетчер: локальные модели -> embed_local, остальные -> bothub."""
+    """Dispatcher: local models -> embed_local, the rest -> bothub."""
     if model in LOCAL:
         from lab.embed_local import embed_local
         return embed_local(texts)
@@ -55,7 +57,8 @@ def _slug(model):
 
 
 def ensure_corpus(model, posts, batch=32):
-    """Векторы всех постов для модели. Кэш на диске (рядом со скриптом)."""
+    """Vectors of all posts for a model. Cache on disk (next to the
+    script)."""
     path = os.path.join(HERE, f"eval_cache_{_slug(model)}.npz")
     try:
         return np.load(path)["V"]
@@ -73,7 +76,7 @@ def ensure_corpus(model, posts, batch=32):
 
 
 def rank_metrics(V, q, posts, gt):
-    """Косинус ко всем постам -> recall@5, hit@5, MRR против gt-множества id."""
+    """Cosine against all posts -> recall@5, hit@5, MRR vs the gt id set."""
     norms = np.linalg.norm(V, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     Vn = V / norms
@@ -106,7 +109,7 @@ def main():
             rows.append((model, dim, None, None, None))
             continue
 
-        # векторы запросов одним батчем (qwen — с instruction-префиксом)
+        # query vectors in one batch (qwen — with the instruction prefix)
         qv, _ = embed_texts([format_query(model, q) for q in queries], model)
         qv = [np.asarray(v, dtype=np.float32) for v in qv]
 
@@ -118,7 +121,7 @@ def main():
             mrr.append(m)
         rows.append((model, dim, np.mean(rec), np.mean(hit), np.mean(mrr)))
 
-    # --- таблица ---
+    # --- table ---
     print("\n" + "=" * 78)
     print(f"{'model':<26}{'dim':>6}{'recall@5':>10}{'hit@5':>8}{'MRR':>8}")
     print("-" * 78)

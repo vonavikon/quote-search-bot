@@ -1,22 +1,25 @@
-"""Картинки карточек: пул PD-art с Wikimedia Commons.
+"""Card images: a PD-art pool from Wikimedia Commons.
 
-Подбор картины детерминирован, без LLM:
-1. совпадение темы запроса с тегами картины — префиксное сравнение с запасом
-   на окончание (одиночество/одиночестве, свеча/свечи);
-2. семантическая карта painting_map.json — заранее посчитанное соответствие
-   «настроение текста поста -> картина» (косинус эмбеддинга текста против
-   эмбеддингов LLM-описаний картин). В рантайме это чтение json;
-3. нет совпадения — та же проба по словам текста самой цитаты: «упражняй
-   себя трудами» получает тематическую картину, а не случайную по хэшу;
-4. и это не совпало — стабильный хэш post_id: карточка всегда с одной
-   картиной;
-5. занятые в колоде картины пропускаются (перебор вперёд от хэша).
+Painting selection is deterministic, no LLM:
+1. the query topic matching a painting's tags — a prefix comparison with
+   slack for the ending (одиночество/одиночестве, свеча/свечи);
+2. the semantic map painting_map.json — a precomputed correspondence
+   "mood of the post text -> painting" (cosine of the text embedding
+   against embeddings of LLM painting descriptions). At runtime it is a
+   json read;
+3. no match — the same probe over the words of the quote text itself:
+   «упражняй себя трудами» gets a thematic painting, not a random one by
+   hash;
+4. that missed too — a stable hash of post_id: the card always comes
+   with the same painting;
+5. paintings already used in the deck are skipped (a forward walk from
+   the hash).
 
-Манифест paintings/paintings.json: [{id, file, title, author, year, themes[]}].
-painting_vecs.npz рядом с манифестом — матрица эмбеддингов описаний,
-выровнена по порядку манифеста (для досшивки карты новым постам).
-Кэш file_id Telegram живёт в DATA_DIR (volume), файлы пула докачиваются
-fetch_paintings.py.
+The paintings/paintings.json manifest: [{id, file, title, author, year,
+themes[]}]. painting_vecs.npz next to the manifest is the description
+embedding matrix, aligned with the manifest order (for catching the map
+up on new posts). The Telegram file_id cache lives in DATA_DIR (a
+volume); pool files are downloaded by fetch_paintings.py.
 """
 import hashlib
 import json
@@ -30,14 +33,14 @@ POOL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paintings")
 MANIFEST_PATH = os.path.join(POOL_DIR, "paintings.json")
 FILE_IDS_PATH = os.path.join(DATA_DIR, "file_ids.json")
 
-# семантическая карта: сид в репо (только чтение), рабочая копия в volume
+# semantic map: the seed lives in the repo (read-only), the working copy in the volume
 MAP_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "painting_map.json")
 MAP_PATH = os.path.join(DATA_DIR, "painting_map.json")
 VECS_PATH = os.path.join(POOL_DIR, "painting_vecs.npz")
 TOP_K = 5
 
-# сколько первых слов текста цитаты участвует в подборе темы
+# how many leading words of the quote text take part in theme matching
 MAX_TOKENS = 80
 
 
@@ -46,8 +49,8 @@ def _norm(s):
 
 
 def _prefix_match(tok, theme):
-    """Совпадение с запасом на окончание: общий префикс покрывает короткую
-    сторону почти целиком (минус 1) и не короче 4 букв."""
+    """A match with slack for the ending: the common prefix covers the
+    short side almost entirely (minus 1) and is at least 4 letters."""
     cp = os.path.commonprefix([tok, theme])
     return len(cp) >= 4 and len(cp) >= min(len(tok), len(theme)) - 1
 
@@ -59,10 +62,10 @@ def _manifest():
 
 
 def _theme_index(manifest):
-    """[(норм. тег, [картины в порядке манифеста])] в порядке первого
-    появления тега. Уникальных тегов ~90, пар картина-тег ~1400: слово
-    сравнивается с уникальными тегами, а не с каждой парой — на длинных
-    текстах это на порядок дешевле."""
+    """[(normalized tag, [paintings in manifest order])] in the order of
+    the tag's first appearance. ~90 unique tags, ~1400 painting-tag
+    pairs: a word is compared against unique tags, not against every
+    pair — an order of magnitude cheaper on long texts."""
     order, by_theme = [], {}
     for p in manifest:
         for th in p["themes"]:
@@ -81,9 +84,10 @@ def _cached_theme_index():
 
 @lru_cache(maxsize=1)
 def _painting_map():
-    """Карта «post_id -> [id картин top-5]»: сид из репо, поверх — рабочая
-    копия из volume (её дошивает extend_painting_map). Слияние, а не выбор
-    одной: обновлённый деплоем сид виден и при устаревшей копии в volume."""
+    """The map "post_id -> [top-5 painting ids]": the seed from the repo,
+    with the working copy from the volume layered on top (extend_painting_map
+    adds to it). A merge, not a choice of one: a seed updated by a deploy
+    is visible even when the volume copy is stale."""
     out = {}
     for path in (MAP_SEED_PATH, MAP_PATH):
         if os.path.exists(path):
@@ -98,8 +102,8 @@ def _by_id():
 
 
 def semantic_candidates(post_id):
-    """Кандидаты семантической карты: топ-K картин по настроению текста
-    поста (посчитано офлайн). Поста нет в карте — []."""
+    """Semantic map candidates: the top-K paintings for the post text's
+    mood (computed offline). A post missing from the map — []."""
     out = []
     for pid in _painting_map().get(str(post_id), []):
         p = _by_id().get(pid)
@@ -109,18 +113,19 @@ def semantic_candidates(post_id):
 
 
 def extend_painting_map(texts):
-    """Дошивает карту новым постам {post_id: текст} — вызывается на старте
-    бота после index.build. Один embed_query на пост (батчами по 32) против
-    матрицы описаний painting_vecs.npz; результат пишется в DATA_DIR, сид в
-    репо не трогается. Сеть/матрица недоступны или размер не сходится —
-    тихий возврат 0: посты остаются на темах текста и хэше."""
+    """Catches the map up on new posts {post_id: text} — called at bot
+    startup after index.build. One embed_query per post (batches of 32)
+    against the painting_vecs.npz description matrix; the result goes to
+    DATA_DIR, the repo seed is not touched. Network/matrix unavailable or
+    the size doesn't add up — a silent return of 0: the posts stay on
+    text themes and the hash."""
     todo = {str(pid): t[:1000] for pid, t in texts.items()
             if str(pid) not in _painting_map() and t}
     if not todo:
         return 0
     if not os.path.exists(VECS_PATH):
         return 0
-    import numpy as np  # lazy: рантайну без досшивки numpy не нужен
+    import numpy as np  # lazy: runtime without the catch-up doesn't need numpy
     V = np.load(VECS_PATH)["v"]
     manifest = _manifest()
     if V.shape[0] != len(manifest):
@@ -138,7 +143,7 @@ def extend_painting_map(texts):
             for j, (pid, _) in enumerate(batch):
                 top = sims[j].argsort()[::-1][:TOP_K]
                 pmap[pid] = [manifest[k]["id"] for k in top]
-    except Exception as e:  # сеть bothub — не повод ронять старт
+    except Exception as e:  # the bothub network is no reason to kill startup
         print(f"painting_map: досшивка прервана ({e}), {len(pmap)} готово")
     added = sum(1 for pid in todo if pid in pmap)
     if added:
@@ -150,11 +155,11 @@ def extend_painting_map(texts):
 
 
 def theme_candidates(query, manifest=None):
-    """Все картины, чей тег совпадает со словом запроса, в порядке слов
-    запроса и порядка манифеста. [] — совпадений нет.
+    """All paintings whose tag matches a word of the query, in the order
+    of query words and manifest order. [] — no matches.
 
-    Слова дедуплицируются, берётся не больше MAX_TOKENS первых — текст
-    цитаты бывает длинным, а хвост всё равно не выигрывает у головы."""
+    Words are deduplicated and only the first MAX_TOKENS are taken —
+    quote texts run long, and the tail never beats the head anyway."""
     index = _cached_theme_index() if manifest is None else _theme_index(manifest)
     tokens, seen = [], set()
     for tok in re.findall(r"[а-яёa-z0-9-]+", _norm(query)):
@@ -175,16 +180,18 @@ def theme_candidates(query, manifest=None):
 
 
 def pick(post_id, query="", exclude=None, text=""):
-    """Картина для карточки. Порядок попыток:
-    1. тема запроса — первая свободная из тематических кандидатов
-       (намерение пользователя главнее заготовки по настроению);
-    2. семантическая карта — топ-K картин поста по настроению текста;
-    3. тема текста самой цитаты — та же проба по словам цитаты (фолбэк
-       до хэша: стоическая цитата о труде получает «Сеятеля», а не
-       случайную картину по хэшу post_id);
-    4. стабильный хэш post_id с перебором вперёд — карточка без запроса
-       всегда с одной картиной, а exclude (занятые в этой колоде) пропускается.
-    Если свободных не осталось (колода длиннее пула) — последний резерв."""
+    """A painting for the card. Order of attempts:
+    1. the query theme — the first free one among the thematic candidates
+       (the user's intent beats a precomputed mood pick);
+    2. the semantic map — the top-K paintings for the post by the mood of
+       its text;
+    3. the theme of the quote text itself — the same probe over the
+       quote's words (a fallback before the hash: a Stoic quote about
+       labor gets "The Sower", not a random painting by post_id hash);
+    4. a stable hash of post_id with a forward walk — a card without a
+       query always has the same painting, and exclude (the ones taken
+       in this deck) is skipped.
+    Nothing free left (a deck longer than the pool) — the last resort."""
     manifest = _manifest()
     exclude = {e["id"] if isinstance(e, dict) else e for e in (exclude or ())}
     if query:
@@ -210,7 +217,7 @@ def painting_path(painting):
     return os.path.join(POOL_DIR, painting["file"])
 
 
-# ---------- кэш file_id Telegram ----------
+# ---------- Telegram file_id cache ----------
 
 def load_file_ids():
     if not os.path.exists(FILE_IDS_PATH):

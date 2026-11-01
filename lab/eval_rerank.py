@@ -1,14 +1,14 @@
-"""Эвал реранка: hybrid-онли vs hybrid+rerank на своём эвал-сете.
+"""A rerank eval: hybrid-only vs hybrid+rerank on our own eval set.
 
-Вопрос лабы: даёт ли cross-encoder поверх топ-50 прирост в precision@5?
-Метрики внутри финальной выдачи топ-5:
-  recall@5 — доля GT-постов в топ-5
-  hit@5    — доля запросов с хоть одним GT в топ-5
-  mrr@5    — 1/ранг первого GT в топ-5 (0 если нет)
-Плюс recall@50 — сколько GT вообще в пуле (потолок для реранка: чего нет в топ-50,
-того реранк не вытащит).
+The lab question: does a cross-encoder over the top-50 improve
+precision@5? Metrics inside the final top-5:
+  recall@5 — share of GT posts in the top-5
+  hit@5    — share of queries with at least one GT in the top-5
+  mrr@5    — 1/rank of the first GT in the top-5 (0 if none)
+Plus recall@50 — how much GT is in the pool at all (the rerank ceiling:
+what is missing from the top-50, the rerank cannot rescue).
 
-Запуск:  python -X utf8 eval_rerank.py
+Run:  python -X utf8 eval_rerank.py
 """
 import numpy as np
 
@@ -18,7 +18,8 @@ from lab.rerank import rerank
 
 
 def metrics5(idx_order, posts, gt):
-    """idx_order — список индексов постов; берём [:5]. → (recall5, hit5, mrr5)."""
+    """idx_order — a list of post indexes; take [:5].
+    → (recall5, hit5, mrr5)."""
     gt = set(gt)
     top5_ids = set(posts[i]["id"] for i in idx_order[:5])
     recall5 = len(top5_ids & gt) / len(gt)
@@ -34,23 +35,23 @@ def metrics5(idx_order, posts, gt):
 def main():
     queries = list(EVAL.keys())
 
-    # один retrieve на запрос → пул топ-50; переиспользуем для baseline и rerank
+    # one retrieve per query → the top-50 pool; reused for baseline and rerank
     pools = {}
     for q in queries:
         cand_idx, posts, _, _, _ = retrieve(q, n=50)
         pools[q] = (cand_idx, posts)
 
-    # baseline: порядок гибрида (RRF) внутри топ-5
+    # baseline: the hybrid order (RRF) inside the top-5
     base = np.array([metrics5(pools[q][0], pools[q][1], EVAL[q]) for q in queries])
 
-    # потолок: сколько GT в топ-50 вообще
+    # the ceiling: how much GT is in the top-50 at all
     pool_rec = []
     for q in queries:
         cand_idx, posts = pools[q]
         ids = set(posts[i]["id"] for i in cand_idx)
         pool_rec.append(len(ids & set(EVAL[q])) / len(EVAL[q]))
 
-    # rerank: cross-encoder по пулу → топ-5
+    # rerank: cross-encoder over the pool → top-5
     rr = []
     for q in queries:
         cand_idx, posts = pools[q]
@@ -72,7 +73,7 @@ def main():
     print(f"\nrecall@50 (потолок пула): {np.mean(pool_rec):.3f}")
     print("=" * 56)
 
-    # по запросам: где реранк помог / навредил
+    # per query: where the rerank helped / hurt
     print(f"\n{'запрос':<26}{'hyb r@5':>8}{'rr r@5':>8}{'Δ':>6}   что изменилось")
     print("-" * 70)
     for j, q in enumerate(queries):

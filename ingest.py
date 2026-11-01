@@ -1,9 +1,9 @@
-"""Живой ингест: channel_post / edited_channel_post и /resync.
+"""Live ingest: channel_post / edited_channel_post and /resync.
 
-Мастер до переезда на SQLite: corpus.npz + corpus_meta.json (посты и векторы)
-и normalization.json (метаданные). Всё идемпотентно по post_id + тексту:
-повторная правка поста перешьёт только его вектор, нормализация зовётся
-только для неразмеченных id.
+The master before the move to SQLite: corpus.npz + corpus_meta.json
+(posts and vectors) and normalization.json (metadata). Everything is
+idempotent by post_id + text: re-editing a post re-embeds only its
+vector, normalization is called only for unlabeled ids.
 """
 import numpy as np
 
@@ -13,12 +13,14 @@ import normalize
 
 
 def add_posts(new_posts):
-    """Дошить посты в корпус и нормализовать новые. -> {"added", "normalized", "skipped"}.
+    """Add posts to the corpus and normalize the new ones.
+    -> {"added", "normalized", "skipped"}.
 
-    new_posts: [{id, date, author, text}] в формате load_corpus.
-    skipped — [(id, причина)]: посты, которые инжестить нельзя (родитель
-    склейки или коллизия с дочерним id — курируются в splits.json; текст
-    OCR-поста — в ocr.json, правка канала там замаскировалась бы merge_ocr).
+    new_posts: [{id, date, author, text}] in load_corpus format.
+    skipped — [(id, reason)]: posts that must not be ingested (the parent
+    of a glue or a collision with a child id — both curated in
+    splits.json; the text of an OCR post — in ocr.json, a channel edit
+    there would be masked by merge_ocr).
     """
     cached = index._load_cached()
     if cached is None:
@@ -30,7 +32,7 @@ def add_posts(new_posts):
     kept, skipped = [], []
     for p in new_posts:
         if p["id"] in parents:
-            # иначе live-правка родителя вернула бы его в корпус рядом с детьми
+            # otherwise a live edit of the parent would put it back into the corpus next to its children
             skipped.append((p["id"], "родитель склейки: правки курируются в splits.json"))
         elif p["id"] in ocr_ids:
             skipped.append((p["id"], "OCR-пост: текст курируется в ocr.json, "
@@ -51,7 +53,7 @@ def add_posts(new_posts):
 
     for p, v in zip(fresh, index._embed_all(fresh)):
         vec_by_id[p["id"]] = v
-    # старый порядок сохраняем (тексты обновляем на месте), новые — в конец
+    # the old order is preserved (texts updated in place), new ones go to the end
     posts, seen = [], set()
     for p in cached_posts:
         posts.append(by_id_new.get(p["id"], p))
@@ -61,10 +63,11 @@ def add_posts(new_posts):
     V = np.array([vec_by_id[p["id"]] for p in posts], dtype=np.float32)
     index.save(V, posts, cached_model)
 
-    # normalize.run() добирает только новые id (его посты — из meta, уже с fresh)
+    # normalize.run() only picks up the new ids (its posts come from meta, already with fresh)
     cache, stats, _ = normalize.run()
-    # SQLite — источник истины: каждая запись ингеста дублируется в базу;
-    # items — с merge детей склеек, чтобы канон не терял их метаданные
+    # SQLite is the source of truth: every ingest record is duplicated
+    # into the base; items — with the split-children merge, so the canon
+    # keeps their metadata
     import cards
     import store
     store.upsert(store.connect(), posts, cards.load_norm())
@@ -72,12 +75,13 @@ def add_posts(new_posts):
 
 
 def resync(export_path):
-    """Экспорт result.json из чата -> добор недостающего. -> как add_posts."""
+    """A result.json export from the chat -> pick up what is missing.
+    -> same shape as add_posts."""
     return add_posts(load_posts(export_path))
 
 
 def stats():
-    """Сводка для /stats."""
+    """Summary for /stats."""
     cached = index._load_cached()
     n_vec = int(cached[0].shape[0]) if cached else 0
     posts = load_posts()
@@ -97,6 +101,6 @@ def stats():
     try:
         import store
         out["SQLite"] = store.counts()
-    except Exception:  # noqa: BLE001 — база опциональна до первой миграции
+    except Exception:  # noqa: BLE001 — the base is optional until the first migration
         pass
     return out

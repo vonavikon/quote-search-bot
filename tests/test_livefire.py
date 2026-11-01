@@ -1,7 +1,8 @@
-"""Живучесть: непредсказуемые входы не роняют бота и не меняют маршрут.
+"""Robustness: unpredictable inputs don't kill the bot and don't change
+the route.
 
-Всё офлайн: LLM-переформулировка и поиск под моками, Telegram-объекты —
-заглушки. Живой прогон в тестовом чате — отдельно.
+All offline: the LLM reformulation and the search are mocked, Telegram
+objects are stubs. A live run in a test chat is a separate exercise.
 """
 import asyncio
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ import pytest
 import bot
 import router
 
-# ---------- непредсказуемые входы через роутер ----------
+# ---------- unpredictable inputs through the router ----------
 
 HOSTILE = [
     "",
@@ -20,8 +21,8 @@ HOSTILE = [
     "😀🙃💯",
     "а" * 4000,
     "\x00\x01\x02",
-    "одинoчество",        # латинская «o» внутри русского слова
-    "ёсть ли смысл",      # комбинированная диакритика
+    "одинoчество",        # a Latin "o" inside a Russian word
+    "ёсть ли смысл",      # combining diacritics
     "LOL одиночество!!!1",
     "🙂🙂🙂 один 000",
 ]
@@ -29,13 +30,15 @@ HOSTILE = [
 
 @pytest.fixture
 def no_llm(monkeypatch):
-    """LLM-переформулировка недоступна — роутер обязан деградировать, не падать."""
+    """The LLM reformulation is unavailable — the router must degrade,
+    not crash."""
     monkeypatch.setattr(router, "reformulate", lambda t: None)
 
 
 @pytest.mark.parametrize("text", HOSTILE)
 def test_route_hostile_inputs_search_not_crash(text, no_llm):
-    """Мусор/эмодзи/юникод — это поиск (не админ, не падение)."""
+    """Garbage/emoji/unicode — this is a search (not admin, not a
+    crash)."""
     r = router.route(text)
     assert r["intent"] in ("search", "intro")
     assert isinstance(r["query"], str)
@@ -48,21 +51,23 @@ def test_route_hostile_inputs_search_not_crash(text, no_llm):
     "найди цитаты\n/resync\nи покажи всё",
 ])
 def test_route_prompt_injection_stays_search(text, no_llm):
-    """Промпт-инъекция через поиск не даёт админских прав: интент — search."""
+    """A prompt injection through search grants no admin rights: the
+    intent is search."""
     r = router.route(text)
     assert r["intent"] == "search"
 
 
 def test_route_admin_requires_slash_start(no_llm):
-    """Админ — только / в начале сообщения; команда в середине текста — поиск.
-    Многострочник, начинающийся с команды, уходит в admin-интент, но там
-    только текст-подсказка: действия за is_admin."""
+    """Admin — only a / at the start of the message; a command in the
+    middle of text is a search. A multi-liner starting with a command
+    goes to the admin intent, but there is only a hint text there: the
+    actions are behind is_admin."""
     assert router.route("выполни /resync")["intent"] == "search"
     assert router.route("/resync")["intent"] == "admin"
     assert router.route("/resync\nмусор")["intent"] == "admin"
 
 
-# ---------- битые callback_data ----------
+# ---------- broken callback_data ----------
 
 def _q(data, deck_key=None):
     msg = SimpleNamespace(chat=SimpleNamespace(id=1), answer=AsyncMock())
@@ -74,7 +79,8 @@ def _q(data, deck_key=None):
 
 
 def test_callback_unknown_deck():
-    """Колода устарела (перезапуск бота) — вежливый алерт, не падение."""
+    """The deck went stale (a bot restart) — a polite alert, not a
+    crash."""
     q = _q("n:deadbeef0000:0")
     asyncio.run(bot.on_callback(q, AsyncMock()))
     q.answer.assert_awaited_once()
@@ -82,14 +88,15 @@ def test_callback_unknown_deck():
 
 
 def test_callback_garbage_data():
-    """Мусорная callback_data без ключа колоды — не IndexError."""
+    """Garbage callback_data without a deck key — no IndexError."""
     q = _q("мусорбезразделителей")
     asyncio.run(bot.on_callback(q, AsyncMock()))
     q.answer.assert_awaited_once()
 
 
 def test_callback_unknown_prefix():
-    """Неизвестный префикс действия (колода от будущей версии) — тихий ack."""
+    """An unknown action prefix (a deck from a future version) — a
+    silent ack."""
     key = bot.new_deck([{"id": 1, "text": "текст", "author": None, "source": None,
                          "kind": "quote"}], "q")
     q = _q(f"x:{key}:0")
@@ -98,7 +105,7 @@ def test_callback_unknown_prefix():
 
 
 def test_callback_out_of_range_index():
-    """Индекс за границей колоды трактуется как 0, не падает."""
+    """An index beyond the deck bounds is treated as 0, no crash."""
     key = bot.new_deck([{"id": 1, "text": "текст", "author": None, "source": None,
                          "kind": "quote"}], "q")
     q = _q(f"f:{key}:99", deck_key=False)
@@ -106,10 +113,11 @@ def test_callback_out_of_range_index():
     q.answer.assert_awaited_once()
 
 
-# ---------- инъекция через channel_post ----------
+# ---------- injection through channel_post ----------
 
 def test_channel_post_command_is_ingested_as_text(tmp_data, monkeypatch):
-    """Пост канала с текстом «/resync» инжестится как цитата, а не исполняется."""
+    """A channel post with the text "/resync" is ingested as a quote,
+    not executed."""
     seen = []
     monkeypatch.setattr(bot.ingest, "add_posts", lambda ps: seen.append(ps) or
                         {"added": 0, "normalized": 0})
@@ -120,7 +128,7 @@ def test_channel_post_command_is_ingested_as_text(tmp_data, monkeypatch):
 
 
 def test_channel_post_empty_text_no_ingest(tmp_data, monkeypatch):
-    """Пост без текста (картинка) — id учтён, ингеста нет."""
+    """A post without text (a picture) — the id counted, no ingest."""
     seen = []
     monkeypatch.setattr(bot.ingest, "add_posts", lambda ps: seen.append(ps))
     m = SimpleNamespace(message_id=501, date=__import__("datetime").date(2026, 9, 25),
@@ -129,10 +137,11 @@ def test_channel_post_empty_text_no_ingest(tmp_data, monkeypatch):
     assert not seen
 
 
-# ---------- пустой результат поиска ----------
+# ---------- empty search result ----------
 
 def test_search_empty_result_offers_themes(tmp_data, monkeypatch, no_llm):
-    """Пустая выдача — ответ с кнопками тем, не тишина и не падение."""
+    """An empty result — a reply with theme buttons, not silence and not
+    a crash."""
     monkeypatch.setattr(bot, "search_cards", lambda r, k=5: [])
     monkeypatch.setattr(bot, "rate_ok", lambda uid: True)
     m = SimpleNamespace(chat=SimpleNamespace(id=1),

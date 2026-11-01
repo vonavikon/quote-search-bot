@@ -1,4 +1,4 @@
-"""Карточки: сборка из поста + нормализации, подпись, обрезка."""
+"""Cards: assembly from a post + normalization, the signature, cutting."""
 import cards
 
 
@@ -27,28 +27,30 @@ def test_card_text_signature():
 
 
 def test_poem_not_quoted():
-    """Стихи в кавычки не берутся — только цитаты (kind=quote)."""
+    """Poems are not wrapped in quotes — only quotes are (kind=quote)."""
     c = {"id": 1, "text": "строчка стиха", "author": None, "source": None,
          "kind": "poem"}
     assert cards.card_text(c) == "строчка стиха\n\n— Какой-то автор, в каком-то году"
 
 
 def test_own_quotes_not_doubled():
-    """Канал сам ставит кавычки: своя пара + обёртка = ««двойные»» — снимаем внешнюю."""
+    """The channel adds quotes itself: its own pair + the wrapper = ««double»» — we strip the outer one."""
     c = {"id": 1, "text": "«Уже в кавычках»", "author": None, "source": None,
          "kind": "quote"}
     assert cards.card_text(c) == "«Уже в кавычках»\n\n— Какой-то автор, в каком-то году"
 
 
 def test_own_quotes_with_period():
-    """Своя пара с точкой после: снимаем пару, точка остаётся, обёртка одна."""
+    """Its own pair with a period after: strip the pair, keep the period,
+    one wrapper."""
     c = {"id": 1, "text": "«Цитата».", "author": None, "source": None,
          "kind": "quote"}
     assert cards.card_text(c).startswith("«Цитата.»")
 
 
 def test_nested_quotes_balance():
-    """Своя внешняя пара с вложенной цитатой: баланс кавычек сохраняется."""
+    """Its own outer pair with a nested quote inside: the quote balance is
+    preserved."""
     c = {"id": 1, "text": "«Он сказал «да» и ушёл»", "author": None,
          "source": None, "kind": "quote"}
     t = cards.card_text(c)
@@ -56,14 +58,14 @@ def test_nested_quotes_balance():
 
 
 def test_inner_quotes_kept():
-    """Внутренние кавычки цитаты остаются, обёртка добавляется одна."""
+    """Inner quotes of the quote stay, the wrapper is added once."""
     c = {"id": 1, "text": "он сказал «да» и всё", "author": None, "source": None,
          "kind": "quote"}
     assert cards.card_text(c).startswith("«он сказал «да» и всё»")
 
 
 def test_unknown_author_fallback():
-    """Публичная карточка без автора подписывается честную заглушку."""
+    """A public card without an author is signed with an honest stub."""
     c = {"id": 1, "text": "цитата", "author": None, "source": None,
          "kind": "quote"}
     assert cards.card_text(c) == "«цитата»\n\n— Какой-то автор, в каком-то году"
@@ -73,7 +75,7 @@ def test_card_text_truncation():
     c = {"id": 1, "text": "а" * 4000, "author": "Автор", "source": None,
          "kind": "quote"}
     t = cards.card_text(c)
-    assert t.startswith("«") and "…" in t  # обрезка внутри кавычек
+    assert t.startswith("«") and "…" in t  # the cut happens inside the quotes
     assert cards.truncated(c)
     assert len(cards.card_text(c, full=True)) == 4000 + 2 + len("\n\n— Автор")
 
@@ -86,36 +88,38 @@ def test_card_text_short_not_truncated():
 
 
 def test_load_norm_empty(tmp_data):
-    assert cards.load_norm() == {}  # файла нет — пусто, не падает
+    assert cards.load_norm() == {}  # no file — empty, no crash
 
 
 def test_immutable_span():
-    """Карточка хранит исходник дословно: показ меняет только типографику."""
+    """The card stores the source verbatim: display only changes the
+    typography."""
     raw = 'он сказал - "да"\nвторая строка'
     c = cards.card(_post(raw))
-    assert c["text"] == raw  # исходник не переписан
+    assert c["text"] == raw  # the source is not rewritten
     assert cards.card_text(c, full=True).startswith("«он сказал — «да»")
 
 
-# ---------- срез хвостовой подписи автора ----------
+# ---------- stripping the trailing author signature ----------
 
 def test_strip_author_tail_removes_signature():
-    """Подпись автора в хвосте поста срезается: автор не дублируется и
-    не попадает внутрь «кавычек» цитаты."""
+    """The author signature at the post tail is cut: the author is not
+    duplicated and never lands inside the quote's «quotes»."""
     c = {"id": 1, "text": "мудрая мысль\n\n— Достоевский", "author": "Достоевский",
          "source": None, "kind": "quote"}
     assert cards.card_text(c, full=True) == "«мудрая мысль»\n\n— Достоевский"
 
 
 def test_strip_author_tail_two_lines():
-    """Подпись из двух строк (имя + тире с фамилией) срезается целиком."""
+    """A two-line signature (name + dash with surname) is cut whole."""
     c = {"id": 1, "text": "мысль\nФёдор Достоевский\n— Достоевский",
          "author": "Фёдор Достоевский", "source": None, "kind": "quote"}
     assert cards.card_text(c, full=True) == "«мысль»\n\n— Фёдор Достоевский"
 
 
 def test_strip_author_tail_no_signature_keeps_text():
-    """Пост без подписи в тексте не меняется (последняя строка не матчится)."""
+    """A post without an in-text signature is unchanged (the last line
+    doesn't match)."""
     c = {"id": 1, "text": "мысль про Достоевского в тексте",
          "author": "Достоевский", "source": None, "kind": "quote"}
     assert cards.card_text(c, full=True) == \
@@ -123,7 +127,7 @@ def test_strip_author_tail_no_signature_keeps_text():
 
 
 def test_strip_author_tail_no_author():
-    """Без автора резать нечего — заглушка, текст целиком."""
+    """No author — nothing to cut: the stub, the text whole."""
     c = {"id": 1, "text": "цитата\n— Кто-то", "author": None,
          "source": None, "kind": "quote"}
     assert cards.card_text(c, full=True) == \
@@ -131,21 +135,23 @@ def test_strip_author_tail_no_author():
 
 
 def test_strip_author_tail_guard_all_matched():
-    """Если срез съел бы весь текст — возвращаем исходник (guard на пустоту)."""
+    """If the cut would eat the whole text — return the original (the
+    emptiness guard)."""
     c = {"id": 1, "text": "Достоевский", "author": "Достоевский",
          "source": None, "kind": "quote"}
     assert cards.strip_author_tail(c) == "Достоевский"
 
 
 def test_strip_author_tail_stops_after_limit():
-    """Не больше 3 строк за один срез — четвёртая строка-совпадение остаётся."""
+    """No more than 3 lines per cut — a fourth matching line stays."""
     c = {"id": 1, "text": "мысль\n" + "Достоевский\n" * 4,
          "author": "Достоевский", "source": None, "kind": "quote"}
     assert cards.strip_author_tail(c).count("Достоевский") == 1
 
 
 def test_strip_author_tail_with_source_line():
-    """Хвост «автор + книга»: срезаются обе строки (источник выводится отдельно)."""
+    """A tail of "author + book": both lines are cut (the source is
+    rendered separately)."""
     c = {"id": 1, "text": "мысль\nАртур Шопенгауэр\n«Афоризмы житейской мудрости»",
          "author": "Артур Шопенгауэр", "source": "Афоризмы житейской мудрости",
          "kind": "quote"}
@@ -153,8 +159,9 @@ def test_strip_author_tail_with_source_line():
 
 
 def test_strip_author_tail_short_word_in_body():
-    """Короткое слово автора внутри цитаты («как Петр Великий научил...») не
-    провоцирует срез: матчится только фамилия — самое длинное слово."""
+    """A short word of the author's name inside the quote («как Петр
+    Великий научил...») does not trigger the cut: only the surname — the
+    longest word — matches."""
     c = {"id": 1, "text": "Я люблю моё Отечество, как Петр Великий научил "
                           "меня любить его.\n\nПётр Чаадаев",
          "author": "Пётр Чаадаев", "source": None, "kind": "quote"}
@@ -162,7 +169,8 @@ def test_strip_author_tail_short_word_in_body():
 
 
 def test_strip_author_tail_long_line_guard():
-    """Совпадение в длинной строке (200+ знаков) — это контент, не подпись."""
+    """A match in a long line (200+ chars) — that is content, not a
+    signature."""
     long_quote = ("Артур Шопенгауэр: «Больше всего толпа ненавидит того, кто "
                   "думает иначе; дело не столько в самом мнении, сколько "
                   "в дерзости желания думать самостоятельно».")

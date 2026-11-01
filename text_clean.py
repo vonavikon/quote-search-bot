@@ -1,16 +1,18 @@
-"""Типографика показа.
+"""Display typography.
 
-Исходник корпуса неизменен (immutable span): text_clean применяется только
-при отрисовке карточки как чистая детерминированная функция. Правила
-консервативные (длина не растёт, пороги обрезки честны):
+The corpus source is unchanged (immutable span): text_clean is applied
+only when rendering a card, as a pure deterministic function. The rules
+are conservative (length never grows, cut thresholds stay honest):
 
-  1. Прямые двойные кавычки "..." -> «...» (парные, чередованием по всему
-     тексту: многострочная цитата открывается в одной строке, закрывается
-     в другой — парность в пределах строки ломала такие посты).
-  2. Межсловное тире « - » -> « — » (дефис внутри слов не трогаем).
-  3. Концевые пробелы строк срезаются (невидимы в Telegram, 40% корпуса).
+  1. Straight double quotes "..." -> «...» (paired, alternating over the
+     whole text: a multi-line quote opens on one line and closes on
+     another — per-line pairing broke such posts).
+  2. Inter-word dash « - » -> « — » (a hyphen inside words is untouched).
+  3. Trailing spaces on lines are cut (invisible in Telegram, 40% of
+     the corpus).
 
-Апострофы, многоточия и прочее не трогаем: минимализм важнее идеала.
+Apostrophes, ellipses and the rest are untouched: minimalism beats
+perfection.
 """
 import re
 
@@ -18,9 +20,10 @@ _DASH = re.compile(r"(?<=\S) - (?=\S)")
 
 
 def apply(text):
-    """Типографская проекция текста для показа. Чистая, без сети и LLM."""
+    """A typographic projection of the text for display. Pure, no network
+    and no LLM."""
     out = []
-    open_quote = True  # парность по всему тексту: многострочные цитаты
+    open_quote = True  # pairing over the whole text: multi-line quotes
     for ch in text:
         if ch == '"':
             out.append("«" if open_quote else "»")

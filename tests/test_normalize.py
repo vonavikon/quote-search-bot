@@ -1,4 +1,4 @@
-"""Нормализация: clip, детерминированное правило доверия."""
+"""Normalization: clip, the deterministic trust rule."""
 import normalize
 
 
@@ -27,7 +27,8 @@ def test_enforce_trust_signed_keeps():
 
 
 def test_enforce_trust_demotes_unsupported():
-    """Автор не в последних 2 строках — понижение в guess (мисатрибуция)."""
+    """The author is not in the last 2 lines — demoted into guess (a
+    misattribution)."""
     items = {"2": {"author": "Флоренский", "author_evidence": "signed",
                    "author_guess": None}}
     posts = [_post(2, "цитата без подписи автора")]
@@ -39,13 +40,14 @@ def test_enforce_trust_demotes_unsupported():
 
 def test_enforce_trust_yo_e_insensitive():
     items = {"3": {"author": "Пётр Терёшин", "author_evidence": "signed"}}
-    posts = [_post(3, "текст\n- Петр Терешин")]  # е вместо ё в подписи
+    posts = [_post(3, "текст\n- Петр Терешин")]  # е instead of ё in the signature
     assert normalize.enforce_trust(items, posts) == 0
 
 
 def test_enforce_trust_short_words_guard():
-    """Все слова автора короче 4 букв («Ян Ли») — значимых слов нет, проверка
-    бессильна: автор остаётся (проверка не опровергла подпись, а не доказала)."""
+    """All the author's words are shorter than 4 letters («Ян Ли») — no
+    meaningful words, the check is powerless: the author stays (the
+    check failed to refute the signature, not to prove it)."""
     items = {"4": {"author": "Ян Ли", "author_evidence": "signed"}}
     posts = [_post(4, "путь в пустоте")]
     assert normalize.enforce_trust(items, posts) == 0

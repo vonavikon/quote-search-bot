@@ -1,12 +1,15 @@
-"""Строит и кэширует индекс: шьёт посты корпуса один раз, сохраняет в corpus.npz.
+"""Builds and caches the index: embeds the corpus posts once, saves to
+corpus.npz.
 
-Инкрементален: при новом экспорте result.json дошивает только НОВЫЕ и
-ИЗМЕНЁННЫЕ посты (сопоставление по post_id + тексту), старые векторы берёт
-из кэша. Удалённые из корпуса посты просто выпадают из матрицы — перешив
-не нужен. Полный перешив — флагом --rebuild. Прототип будущей /resync.
+Incremental: on a new result.json export it re-embeds only NEW and
+CHANGED posts (matched by post_id + text), taking old vectors from the
+cache. Posts deleted from the corpus simply drop out of the matrix — no
+re-embed needed. A full re-embed — via the --rebuild flag. A prototype
+of the future /resync.
 
-Параллельные поиски и ингест пишут кэш под одним локом, запись атомарна
-(tmp-файл + os.replace): читатель не видит полупустой corpus_meta.json.
+Concurrent searches and ingest write the cache under one lock, the write
+is atomic (a tmp file + os.replace): a reader never sees a half-empty
+corpus_meta.json.
 """
 import json
 import os
@@ -22,17 +25,17 @@ CACHE = os.path.join(DATA_DIR, "corpus.npz")
 META = os.path.join(DATA_DIR, "corpus_meta.json")
 BATCH = 32
 
-_LOCK = threading.RLock()  # build держит лок и зовёт save — реентерабельность нужна
-_MEM = None  # (V, posts) последнего успешного build в этом процессе
+_LOCK = threading.RLock()  # build holds the lock and calls save — reentrancy is needed
+_MEM = None  # (V, posts) of the last successful build in this process
 
 
 def _load_cached():
-    """(vectors, cached_posts, cached_model) или None, если кэша нет."""
+    """(vectors, cached_posts, cached_model) or None when there is no cache."""
     if not os.path.exists(CACHE):
         return None
     d = np.load(CACHE)
     meta = json.load(open(META, encoding="utf-8"))
-    # старый формат — просто список постов; новый — {"model": ..., "posts": [...]}
+    # the old format is a plain post list; the new one is {"model": ..., "posts": [...]}
     cached_posts = meta["posts"] if isinstance(meta, dict) else meta
     cached_model = meta.get("model") if isinstance(meta, dict) else None
     return d["vectors"], cached_posts, cached_model
@@ -48,11 +51,11 @@ def _embed_all(posts):
 
 
 def save(V, posts, model=MODEL):
-    """Атомарная запись кэша: оба файла через tmp + os.replace под локом."""
+    """Atomic cache write: both files via tmp + os.replace under the lock."""
     global _MEM
     with _LOCK:
         tmp_c, tmp_m = os.fspath(CACHE) + ".tmp", os.fspath(META) + ".tmp"
-        with open(tmp_c, "wb") as f:  # file-объект: np.savez не дописывает .npz
+        with open(tmp_c, "wb") as f:  # a file object: np.savez would append .npz
             np.savez(f, vectors=V)
         with open(tmp_m, "w", encoding="utf-8") as f:
             json.dump({"model": model, "posts": posts}, f, ensure_ascii=False)
@@ -66,7 +69,7 @@ def build(force=False):
     if not force and _MEM is not None:
         return _MEM
     with _LOCK:
-        if not force and _MEM is not None:  # соседний поток уже собрал
+        if not force and _MEM is not None:  # a sibling thread already built it
             return _MEM
         posts = load_posts()
 
@@ -94,7 +97,7 @@ def build(force=False):
                             vec_by_id[p["id"]] = v
                     else:
                         print("посты исчезли из корпуса: векторы выпадают без перешива")
-                    # исчезнувшие id не попадают в матрицу — их векторы не нужны
+                    # vanished ids never make the matrix — their vectors are not needed
                     V = np.array([vec_by_id[p["id"]] for p in posts], dtype=np.float32)
                     save(V, posts)
                     print(f"готово: {V.shape} (дошито {len(fresh)}).")

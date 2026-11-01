@@ -1,4 +1,5 @@
-"""Retrieval-слой: токенизация, BM25, RRF, правила подключения лексики."""
+"""The retrieval layer: tokenization, BM25, RRF, the rules for
+attaching the lexical leg."""
 from hybrid import BM25, rrf_fusion, tokenize, wants_lexical
 
 
@@ -14,7 +15,7 @@ def test_bm25_ranks_matching_doc():
 
 
 def test_bm25_rare_term_beats_frequent():
-    """Редкое слово весит больше частого (idf)."""
+    """A rare word weighs more than a frequent one (idf)."""
     docs = [["слово"]] * 5 + [["уникум", "слово"]]
     bm = BM25(docs)
     s = bm.scores(["слово", "уникум"])
@@ -23,7 +24,7 @@ def test_bm25_rare_term_beats_frequent():
 
 def test_rrf_fusion_prefers_double_hit():
     fused, score = rrf_fusion([3, 1, 2], [3, 2, 1])
-    assert fused[0] == 3  # топ обоих списков
+    assert fused[0] == 3  # the top of both lists
     assert score[3] > score[1]
 
 
@@ -44,6 +45,6 @@ def test_wants_lexical_quotes():
 
 
 def test_wants_lexical_strong_dense_passes():
-    bm = BM25([["мир"], ["мир"]])  # частое слово, df=2 <= 3 — но заглавных нет
+    bm = BM25([["мир"], ["мир"]])  # a frequent word, df=2 <= 3 — but no capitalized ones
     ok, _ = wants_lexical("про мир и покой", bm, 0.70)
     assert not ok

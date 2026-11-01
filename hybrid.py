@@ -1,9 +1,9 @@
-"""Retrieval: dense (косинус) по умолчанию + BM25 как fallback через RRF.
+"""Retrieval: dense (cosine) by default + BM25 as a fallback via RRF.
 
-Гибрид в лоб ухудшал recall@5 (0.431 против 0.556 у dense-only): BM25
-протаскивает шум на абстрактных темах. Поэтому базовый путь — dense-only,
-лексика подключается точечно (wants_lexical).
-Запуск:
+A naive hybrid made recall@5 worse (0.431 vs 0.556 for dense-only): BM25
+drags in noise on abstract topics. So the base path is dense-only, and
+the lexical leg is attached selectively (wants_lexical).
+Run:
   python -X utf8 hybrid.py одиночество
 """
 import re
@@ -16,26 +16,26 @@ from embed import embed_query
 from index import build
 
 
-# ---------- стадия 3: токенизация ----------
+# ---------- stage 3: tokenization ----------
 _TOKEN_RE = re.compile(r"[a-zа-яё0-9]+")
 
 
 def tokenize(text):
-    """Текст -> список токенов (нижний регистр, только буквы/цифры)."""
+    """Text -> a list of tokens (lowercase, letters/digits only)."""
     return _TOKEN_RE.findall(text.lower())
 
 
-# ---------- стадия 4: BM25 ----------
+# ---------- stage 4: BM25 ----------
 class BM25:
-    """BM25 на токенизированном корпусе. Параметры k1=1.5, b=0.75 (стандарт)."""
+    """BM25 over a tokenized corpus. Parameters k1=1.5, b=0.75 (standard)."""
 
     def __init__(self, tokenized_docs, k1=1.5, b=0.75):
         self.docs = tokenized_docs
         self.N = len(tokenized_docs)
         self.avgdl = sum(len(d) for d in tokenized_docs) / max(1, self.N)
         self.k1, self.b = k1, b
-        self.df = Counter()          # сколько документов содержат термин
-        self.tf = []                 # tf[i] = Counter терминов документа i
+        self.df = Counter()          # how many documents contain the term
+        self.tf = []                 # tf[i] = Counter of terms in document i
         for d in tokenized_docs:
             c = Counter(d)
             self.tf.append(c)
@@ -66,9 +66,9 @@ def math_log(x):
     return math.log(x)
 
 
-# ---------- стадия 5: reciprocal rank fusion ----------
+# ---------- stage 5: reciprocal rank fusion ----------
 def rrf_fusion(dense_order, bm25_order, k=60):
-    """Сливаем два ранжированных списка. score(doc) = Σ 1/(k + ранг)."""
+    """Fuse two ranked lists. score(doc) = Σ 1/(k + rank)."""
     score = Counter()
     for pos, doc in enumerate(dense_order):
         score[doc] += 1 / (k + pos + 1)
@@ -77,20 +77,21 @@ def rrf_fusion(dense_order, bm25_order, k=60):
     return sorted(score, key=lambda d: -score[d]), score
 
 
-# ---------- fallback-политика лексики ----------
+# ---------- lexical fallback policy ----------
 
-WEAK_TOP1 = 0.45  # ниже — dense ничего уверенного не нашёл (мусор/OOV-запрос)
-RARE_DF = 3       # df имени в корпусе, при котором лексический поиск полезен
+WEAK_TOP1 = 0.45  # below this dense found nothing confident (garbage/OOV query)
+RARE_DF = 3       # df of a name in the corpus at which lexical search helps
 
 _NAME_RE = re.compile(r"[А-ЯЁA-Z][а-яёa-z-]+")
 
 
 def wants_lexical(query, bm, dense_top1):
-    """Решает, подключать ли BM25. Возвращает (bool, причина).
+    """Decides whether to attach BM25. Returns (bool, reason).
 
-    Калибровка на qwen3-4b: тематические запросы top-1 0.56–0.67, имена/книги
-    0.50–0.55 (df 0–3), мусор 0.39. Одного косинуса мало (пояса перекрываются),
-    поэтому правил три: слабый top-1, редкое имя собственное, кавычки.
+    Calibrated on qwen3-4b: thematic queries top-1 0.56–0.67, names/books
+    0.50–0.55 (df 0–3), garbage 0.39. Cosine alone is not enough (the
+    bands overlap), hence three rules: a weak top-1, a rare proper name,
+    quotes.
     """
     if dense_top1 < WEAK_TOP1:
         return True, f"dense top-1 {dense_top1:.3f} < {WEAK_TOP1}"
@@ -104,20 +105,20 @@ def wants_lexical(query, bm, dense_top1):
 
 
 def retrieve(query, n=50):
-    """Поиск: dense-only по умолчанию, BM25 как fallback → топ-n постов.
+    """Search: dense-only by default, BM25 as a fallback → top-n posts.
 
-    Возвращает: (order, posts, dense_scores, bm25_scores, path).
-    order — индексы постов (0..N-1); path = "dense" или "hybrid (причина)".
+    Returns: (order, posts, dense_scores, bm25_scores, path).
+    order — post indexes (0..N-1); path = "dense" or "hybrid (reason)".
     """
     V, posts = build()
 
-    # dense: косинус запроса (с instruction-префиксом) ко всем постам
+    # dense: cosine of the query (with the instruction prefix) against all posts
     q = np.array(embed_query(query)[0][0], dtype=np.float32)
     Vn = V / np.linalg.norm(V, axis=1, keepdims=True)
     dense = Vn @ (q / np.linalg.norm(q))
     dense_order = np.argsort(dense)[::-1].tolist()
 
-    # sparse: BM25 по токенам
+    # sparse: BM25 over tokens
     tokens_all = [tokenize(p["text"]) for p in posts]
     bm = BM25(tokens_all)
     bm_scores = bm.scores(tokenize(query))

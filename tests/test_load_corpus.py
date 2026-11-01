@@ -1,4 +1,4 @@
-"""load_corpus: разбор экспорта и серверный фолбэк на meta."""
+"""load_corpus: export parsing and the server fallback to meta."""
 import json
 
 import load_corpus
@@ -12,8 +12,8 @@ def test_flatten_variants():
 
 def test_parse_export_filters_and_fields():
     data = {"messages": [
-        {"id": 1, "type": "service", "text": "пином"},                      # сервисное
-        {"id": 2, "type": "message", "text": "  "},                          # пустой текст
+        {"id": 1, "type": "service", "text": "пином"},                      # a service message
+        {"id": 2, "type": "message", "text": "  "},                          # empty text
         {"id": 3, "type": "message", "date": "2024-03-05T10:00:00",
          "text": "цитата", "forwarded_from": "Канал"},
         {"id": 4, "type": "message", "date": "2024-03-06",
@@ -27,20 +27,20 @@ def test_parse_export_filters_and_fields():
 
 
 def test_load_posts_meta_fallback(tmp_path, monkeypatch):
-    """Нет экспорта (сервер) — посты берутся из corpus_meta.json."""
+    """No export (server) — posts come from corpus_meta.json."""
     meta = {"model": "m", "posts": [{"id": 1, "date": "2024-01-01",
                                      "author": "", "text": "текст"}]}
     meta_path = tmp_path / "corpus_meta.json"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(load_corpus, "DEFAULT_PATH", str(tmp_path / "нет_экспорта.json"))
     monkeypatch.setattr(load_corpus, "META_PATH", str(meta_path))
-    # боевой ocr.json лежит рядом с модулем и втащил бы 169 постов
+    # the live ocr.json sits next to the module and would pull in 169 posts
     monkeypatch.setattr(load_corpus, "OCR_PATH", str(tmp_path / "нет_ocr.json"))
     assert load_corpus.load_posts() == meta["posts"]
 
 
 def test_load_posts_meta_plain_list(tmp_path, monkeypatch):
-    """Старый формат meta — просто список постов."""
+    """The old meta format — a plain list of posts."""
     posts = [{"id": 9, "date": "2024-01-01", "author": "", "text": "x"}]
     meta_path = tmp_path / "corpus_meta.json"
     meta_path.write_text(json.dumps(posts, ensure_ascii=False), encoding="utf-8")
@@ -50,7 +50,7 @@ def test_load_posts_meta_plain_list(tmp_path, monkeypatch):
     assert load_corpus.load_posts() == posts
 
 
-# ---------- OCR-бэкфилл image-only постов ----------
+# ---------- OCR backfill of image-only posts ----------
 
 def _write_ocr(tmp_data, manifest):
     with open(tmp_data / "ocr.json", "w", encoding="utf-8") as f:
@@ -58,12 +58,13 @@ def _write_ocr(tmp_data, manifest):
 
 
 def test_parse_export_fills_ocr_text(tmp_data):
-    """Пост без текста, но с распознанным OCR, входит в корпус с ним."""
+    """A post without text but with OCR recognition enters the corpus
+    with it."""
     _write_ocr(tmp_data, {"7": {"date": "2024-03-07", "author": "",
                                 "text": "цитата с картинки"}})
     data = {"messages": [
         {"id": 7, "type": "message", "date": "2024-03-07", "photo": "photos/x.jpg"},
-        {"id": 8, "type": "message", "date": "2024-03-08"},  # без OCR и без текста
+        {"id": 8, "type": "message", "date": "2024-03-08"},  # no OCR and no text
     ]}
     posts = load_corpus._parse_export(data)
     assert [p["id"] for p in posts] == [7]
@@ -71,7 +72,8 @@ def test_parse_export_fills_ocr_text(tmp_data):
 
 
 def test_merge_ocr_appends_missing_to_meta(tmp_data):
-    """Серверный корпус image-only постов не знает — merge добавляет."""
+    """The server corpus doesn't know image-only posts — merge adds
+    them."""
     _write_ocr(tmp_data, {"7": {"date": "2024-03-07", "author": "",
                                 "text": "цитата с картинки"}})
     meta = {"model": "m", "posts": [{"id": 1, "date": "2024-01-01",
@@ -84,7 +86,8 @@ def test_merge_ocr_appends_missing_to_meta(tmp_data):
 
 
 def test_merge_ocr_no_duplicates(tmp_data):
-    """Пост уже в корпусе (например, после первого index.save) — дубля нет."""
+    """The post is already in the corpus (say, after the first
+    index.save) — no duplicate."""
     _write_ocr(tmp_data, {"7": {"date": "2024-03-07", "author": "",
                                 "text": "цитата с картинки"}})
     posts = [{"id": 7, "date": "2024-03-07", "author": "", "text": "цитата с картинки"}]
@@ -92,8 +95,9 @@ def test_merge_ocr_no_duplicates(tmp_data):
 
 
 def test_merge_ocr_updates_stale_text(tmp_data):
-    """Правка OCR (мусор распознавания в ocr.json вычищен) доезжает до
-    серверного corpus_meta.json со старым текстом — без ручной правки meta."""
+    """An OCR fix (recognition garbage cleaned out of ocr.json) reaches
+    the server corpus_meta.json with the old text — without hand-editing
+    the meta."""
     _write_ocr(tmp_data, {"7": {"date": "2024-03-07", "author": "",
                                 "text": "чистый текст"}})
     meta = {"model": "m", "posts": [
@@ -102,15 +106,16 @@ def test_merge_ocr_updates_stale_text(tmp_data):
     (tmp_data / "corpus_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     out = load_corpus.load_posts()
-    assert out[0]["text"] == "чистый текст"  # ocr.json — источник текста OCR-поста
+    assert out[0]["text"] == "чистый текст"  # ocr.json — the source of an OCR post's text
 
 
 def test_load_ocr_broken_file_degrades(tmp_data):
     (tmp_data / "ocr.json").write_text('{"7": ', encoding="utf-8")
-    assert load_corpus.load_ocr() == {}  # битый JSON не роняет загрузку корпуса
+    assert load_corpus.load_ocr() == {}  # broken JSON doesn't kill the corpus load
 
 
 def test_load_ocr_empty_text_skipped(tmp_data):
-    """Пост с пустым распознаванием (мусорная картинка) в корпус не идёт."""
+    """A post with empty recognition (a garbage picture) doesn't make
+    the corpus."""
     _write_ocr(tmp_data, {"7": {"date": "2024-03-07", "author": "", "text": "  "}})
     assert load_corpus.load_ocr() == {}

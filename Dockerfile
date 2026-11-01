@@ -9,7 +9,7 @@ COPY *.py .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# состояние (SQLite, кэши file_id, разметку картин) держим в volume
+# state (SQLite, file_id caches, the painting map) lives in a volume
 ENV BOT_DATA=/data
 
 ENTRYPOINT ["/entrypoint.sh"]

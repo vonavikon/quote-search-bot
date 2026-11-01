@@ -1,19 +1,19 @@
-# секреты
+# secrets
 .env
 
-# корпус и производные индексов — строятся из result.json
+# the corpus and index derivatives — built from result.json
 result.json
 corpus.npz
 corpus_meta.json
 normalization.json
 
-# локальное состояние: бд, кэши, разметка картин
+# local state: the database, caches, the painting map
 quotes.db
 wiki_cache.json
 file_ids.json
 painting_map.json
 
-# докачанные картины (манифест и векторы в git входят, jpg — нет)
+# downloaded paintings (the manifest and vectors are in git, jpgs are not)
 paintings/*.jpg
 
 # python
@@ -21,6 +21,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# артефакты замеров и логи
+# measurement artifacts and logs
 eval_cache_*.npz
 *.log

@@ -1,43 +1,45 @@
-"""Эвал-сет: запросы + ground truth (канонические посты вашего корпуса).
+"""Eval set: queries + ground truth (canonical posts of your corpus).
 
-  python -X utf8 evalset_draft.py        # канонический сет + GT (печать)
-  python -X utf8 evalset_draft.py --auto # кандидаты: GT = top-3 текущего
-                                         # поиска (для ревью владельцем)
+  python -X utf8 evalset_draft.py        # the canonical set + GT (print)
+  python -X utf8 evalset_draft.py --auto # candidates: GT = the top-3 of
+                                         # the current search (for the
+                                         # owner's review)
 
-GT размечает владелец корпуса: релевантные отмечаются, нерелевантные из
-топа отбрасываются. GT ограничен показанным топом — метрики меряют
-консистентность верха выдачи, не полный recall по теме.
+The GT is labeled by the corpus owner: relevant posts are marked,
+irrelevant ones dropped from the top. The GT is limited to the top shown
+— the metrics measure the consistency of the result head, not full
+recall over a theme.
 """
 import sys
 
 from load_corpus import load_posts
 
-# запрос (как его вводит юзер) -> [id релевантных постов; ваша разметка]
-# Заполните по своему корпусу: id постов берутся из result.json или
-# выдачи режима --auto. Пример:
+# query (as the user types it) -> [relevant post ids; your labeling]
+# Fill in for your corpus: post ids come from result.json or from the
+# --auto output. Example:
 # EVAL = {
 #     "одиночество": [397, 231],
 #     "любовь": [55, 54],
 # }
 EVAL = {}
 
-# Кандидаты: частотные темы + форматы запросов живых пользователей.
-# GT подбирается текущим поиском (--auto) и утверждается владельцем.
+# Candidates: frequent themes + query formats of live users.
+# The GT is picked by the current search (--auto) and approved by the owner.
 CANDIDATE_QUERIES = [
-    # ядро тем
+    # theme core
     "одиночество", "любовь", "смерть", "вера", "дорога", "ночь", "море", "свет",
     "тоска", "память", "надежда", "тишина", "покой", "судьба", "прощение",
     "молитва", "страх", "гордость", "смирение", "мудрость", "свобода",
     "счастье", "совесть", "дружба", "красота", "труд", "борьба", "путь",
-    # чувства и состояния
+    # feelings and states
     "печаль", "радость", "тревога", "отчаяние", "усталость", "вина",
     "благодарность", "ревность", "обида", "вдохновение",
-    # авторские фасеты
+    # author facets
     "пастернак о любви", "чехов о людях", "достоевский о страдании",
     "кьеркегор о вере", "ницше о свободе", "юнг о душе",
-    # точные фразы
+    # exact phrases
     "жалость к себе", "внутренний человек", "ничего не меняется",
-    # бытовые формулировки
+    # everyday phrasings
     "про осень", "про зиму и снег", "про утро", "про вечер",
     "как пережить потерю", "о смысле жизни", "про старость",
     "стих про дорогу", "цитата про книги", "про молчание",
@@ -58,14 +60,14 @@ def main():
                 if not p:
                     print(f"   !! нет поста {pid}")
                     continue
-                # автор карточки — из нормализации; p["author"] — это имя
-                # канала-пересланца, ботом не показывается
+                # the card's author comes from normalization; p["author"]
+                # is the forwarding channel's name, never shown by the bot
                 who = items.get(str(pid), {}).get("author") or "аноним"
                 print(f"   [{pid}] {who} · {p['date']}")
                 print(f"   {p['text'][:380]}\n")
         return
 
-    # режим --auto: кандидаты + top-3 текущего поиска как черновой GT
+    # --auto mode: candidates + the top-3 of the current search as a draft GT
     from router import route, search_cards
     print(f"# Кандидаты: {len(CANDIDATE_QUERIES)} запросов, "
           f"GT = топ текущего поиска (требует ревью)\n")

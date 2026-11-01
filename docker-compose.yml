@@ -7,8 +7,9 @@ services:
     volumes:
       - quote_bot_data:/data
       - ./paintings:/app/paintings:ro
-      # первичный корпус: положите result.json рядом до первого старта;
-      # после первичной индексации строку можно убрать (обновления через /resync)
+      # the primary corpus: put result.json next to this file before the
+      # first start; after the initial indexing the line can be removed
+      # (updates come via /resync)
       - ./result.json:/app/result.json:ro
 
 volumes:
